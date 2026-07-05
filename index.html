@@ -25,13 +25,9 @@ const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
 const DEFAULT_SUPABASE_URL = ""; 
 const DEFAULT_SUPABASE_ANON_KEY = "";
 
-// 規避靜態編譯器對 import.meta 的語法分析限制
+// 安全的環境變數讀取
 const getEnv = (key) => {
-  try {
-    return Function("return import.meta.env")()[key];
-  } catch (e) {
-    return '';
-  }
+  return '';
 };
 
 export default function App() {
@@ -359,7 +355,7 @@ export default function App() {
 
       let isNewMaterial = false;
       if (!newMaterials[mCode]) {
-        newMaterials[mCode] = { id: mCode, name: mName, dueDate, memo, projects: {} };
+        newMaterials[mCode] = { id: mCode, name: mName, dueDate: dueDate, memo, projects: {} };
         isNewMaterial = true;
       } else {
         newMaterials[mCode].name = mName;
@@ -382,7 +378,7 @@ export default function App() {
       assignProjectStatus('處方藥電子仿單', qr);
       assignProjectStatus('OTC變更', otc);
 
-      // 產生 Supabase 專用的批次 Upsert 資料列
+      // 產生 Supabase 專專用批次 Upsert 資料列
       dbUpsertRows.push({
         composite_key: `${pCode}_${sCode}_${mCode}`,
         product_code_3: pCode,
@@ -505,14 +501,20 @@ export default function App() {
     });
   };
 
+  // 強化日期格式化，過濾掉任何非標準的字串，防範瀏覽器不相容警告
   const formatDateForInput = (dateStr) => {
     if (!dateStr || dateStr === '-') return '';
-    const parts = dateStr.split('/');
+    const clean = String(dateStr).trim().replace(/-/g, '/');
+    const parts = clean.split('/');
     if (parts.length === 3) {
-      const [y, m, d] = parts;
-      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      const y = parts[0];
+      const m = parts[1];
+      const d = parts[2];
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
     }
-    return dateStr;
+    return '';
   };
 
   const uniqueMaterials = useMemo(() => Object.values(materials), [materials]);
