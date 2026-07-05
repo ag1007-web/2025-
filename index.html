@@ -25,11 +25,6 @@ const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
 const DEFAULT_SUPABASE_URL = ""; 
 const DEFAULT_SUPABASE_ANON_KEY = "";
 
-// 安全的環境變數讀取
-const getEnv = (key) => {
-  return '';
-};
-
 export default function App() {
   const [products, setProducts] = useState([]);
   const [materials, setMaterials] = useState({});
@@ -42,10 +37,10 @@ export default function App() {
   
   // Supabase 連線憑證狀態
   const [supabaseUrl, setSupabaseUrl] = useState(() => {
-    return getEnv('VITE_SUPABASE_URL') || localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
+    return localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
   });
   const [supabaseKey, setSupabaseKey] = useState(() => {
-    return getEnv('VITE_SUPABASE_ANON_KEY') || localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY;
+    return localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY;
   });
   const [showSettings, setShowSettings] = useState(false);
   const [isDbConnected, setIsDbConnected] = useState(false);
@@ -415,11 +410,6 @@ export default function App() {
       });
     });
 
-    if (dbUpsertRows.length === 0) {
-      showToast("匯入失敗：找不到任何含有「料號」欄位的有效資料列", "error");
-      return;
-    }
-
     // 先行更新本地 UI
     setProducts(newProducts);
     setMaterials(newMaterials);
@@ -430,24 +420,11 @@ export default function App() {
     if (supabase) {
       setIsLoading(true);
       try {
-        const keysToDelete = dbUpsertRows.map(r => r.composite_key);
-        
-        // 1. 批次刪除現有的重複項目（防止 upsert 遭遇 RLS 或缺少 unique constraint 限制而報錯）
-        if (keysToDelete.length > 0) {
-          const { error: delError } = await supabase
-            .from('bom_items')
-            .delete()
-            .in('composite_key', keysToDelete);
-          if (delError) throw delError;
-        }
-
-        // 2. 批次寫入新數據
-        const { error: insError } = await supabase
+        const { error } = await supabase
           .from('bom_items')
-          .insert(dbUpsertRows);
-        
-        if (insError) throw insError;
+          .upsert(dbUpsertRows, { onConflict: 'composite_key' });
 
+        if (error) throw error;
         showToast("資料匯入成功，已同步至 Supabase 雲端！");
       } catch (e) {
         console.error("雲端寫入發生異常：", e);
