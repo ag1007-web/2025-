@@ -1,562 +1,272 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>包材整改專案追蹤系統</title>
-  
-  <!-- 載入 Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- 載入 FontAwesome 圖示 -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- 載入 React 核心庫 -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- 載入 Babel 以支援 JSX -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    .custom-scrollbar::-webkit-scrollbar { height: 8px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-  </style>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>包材整改專案追蹤系統</title>
+ 
+ <!-- 載入 Tailwind CSS -->
+ <script src="https://tailwindcss.com"></script>
+ 
+ <!-- 載入 FontAwesome 圖示 -->
+ <link rel="stylesheet" href="https://cloudflare.com">
+ 
+ <!-- 載入 React 核心庫 -->
+ <script src="https://unpkg.com" crossorigin></script>
+ <script src="https://unpkg.com" crossorigin></script>
+ 
+ <!-- 載入 Babel 以支援 JSX -->
+ <script src="https://unpkg.com"></script>
+ 
+ <!-- 載入 Supabase SDK -->
+ <script src="https://jsdelivr.net"></script>
+ 
+ <style>
+ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+ .custom-scrollbar::-webkit-scrollbar { height: 8px; }
+ .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+ </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
+ <div id="root"></div>
+ <script type="text/babel">
+ const { useState, useMemo, useRef, useEffect } = React;
 
-  <div id="root"></div>
+ // === ⚠️ 請在這裡貼上您的 Supabase 金鑰 ===
+ const SUPABASE_URL = "https://supabase.co";
+ const SUPABASE_ANON_KEY = "sb_publishable_svCuLcspHMXE2hNBXG_v7w_IQsROQ7W";
+ const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  <script type="text/babel">
-    const { useState, useMemo, useRef } = React;
+ const PROJECTS = ["B1F整改", "IWKA轉移", "仿單格式化", "處方藥電子仿單", "OTC變更"];
+ const PROJECT_CONFIG = {
+ 'B1F整改': { color: 'bg-blue-500', textColor: 'text-blue-600', lightBg: 'bg-blue-50', icon: 'fa-solid fa-gear' },
+ 'IWKA轉移': { color: 'bg-amber-500', textColor: 'text-amber-600', lightBg: 'bg-amber-50', icon: 'fa-solid fa-repeat' },
+ '仿單格式化': { color: 'bg-violet-500', textColor: 'text-violet-600', lightBg: 'bg-violet-50', icon: 'fa-solid fa-file-lines' },
+ '處方藥電子仿單': { color: 'bg-emerald-500', textColor: 'text-emerald-600', lightBg: 'bg-emerald-50', icon: 'fa-solid fa-qrcode' },
+ 'OTC變更': { color: 'bg-rose-500', textColor: 'text-rose-600', lightBg: 'bg-rose-50', icon: 'fa-solid fa-shield' }
+ };
+ const STATUS_CONFIG = {
+ 'na': { label: '無須執行', color: 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-gray-200', icon: '' },
+ 'pending': { label: '待改版', color: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200', icon: 'fa-regular fa-circle' },
+ 'revising': { label: '改版中', color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200', icon: 'fa-solid fa-pen' },
+ 'signing': { label: '會簽中', color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200', icon: 'fa-regular fa-clock' },
+ 'released': { label: '已發檔', color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200', icon: 'fa-solid fa-circle-check' }
+ };
+ const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
+ const INITIAL_MATERIALS = {
+ 'pt-891': { id: 'pt-891', name: '鋁管、積層管', dueDate: '2026/08/15', memo: '', projects: {} },
+ 'Pit-521': { id: 'Pit-521', name: '仿單', dueDate: '2026/09/01', memo: '', projects: {} }
+ };
+ const INITIAL_PRODUCTS = [
+ {
+ code: '021', name: '杏聯乳膏',
+ specs: [
+ {
+ code: '02123', name: '10g',
+ materialIds: ['pt-891', 'Pit-521']
+ }
+ ]
+ }
+ ];
 
-    const PROJECTS = ["B1F整改", "IWKA轉移", "仿單格式化", "處方藥電子仿單", "OTC變更"];
+ function App() {
+ const [products, setProducts] = useState(INITIAL_PRODUCTS);
+ const [materials, setMaterials] = useState(INITIAL_MATERIALS);
+ const [searchTerm, setSearchTerm] = useState('');
+ const [expandedProducts, setExpandedProducts] = useState([]);
+ const [expandedSpecs, setExpandedSpecs] = useState([]);
+ const [toastMessage, setToastMessage] = useState(null);
+ const fileInputRef = useRef(null);
 
-    const PROJECT_CONFIG = {
-      'B1F整改': { color: 'bg-blue-500', textColor: 'text-blue-600', lightBg: 'bg-blue-50', icon: 'fa-solid fa-gear' },
-      'IWKA轉移': { color: 'bg-amber-500', textColor: 'text-amber-600', lightBg: 'bg-amber-50', icon: 'fa-solid fa-repeat' },
-      '仿單格式化': { color: 'bg-violet-500', textColor: 'text-violet-600', lightBg: 'bg-violet-50', icon: 'fa-solid fa-file-lines' },
-      '處方藥電子仿單': { color: 'bg-emerald-500', textColor: 'text-emerald-600', lightBg: 'bg-emerald-50', icon: 'fa-solid fa-qrcode' },
-      'OTC變更': { color: 'bg-rose-500', textColor: 'text-rose-600', lightBg: 'bg-rose-50', icon: 'fa-solid fa-shield' }
-    };
+ const showToast = (message, type = 'success') => {
+ setToastMessage({ message, type });
+ setTimeout(() => setToastMessage(null), 3000);
+ };
 
-    const STATUS_CONFIG = {
-      'na': { label: '無須執行', color: 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-gray-200', icon: '' },
-      'pending': { label: '待改版', color: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200', icon: 'fa-regular fa-circle' },
-      'revising': { label: '改版中', color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200', icon: 'fa-solid fa-pen' },
-      'signing': { label: '會簽中', color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200', icon: 'fa-regular fa-clock' },
-      'released': { label: '已發檔', color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200', icon: 'fa-solid fa-circle-check' }
-    };
+ // 【雲端功能】從資料庫下載最新狀態
+ useEffect(() => {
+ async function fetchLatestData() {
+ try {
+ const { data, error } = await supabase
+ .from('bom_snapshots')
+ .select('products_data, materials_data')
+ .order('created_at', { ascending: false })
+ .limit(1);
+ 
+ if (!error && data && data.length > 0) {
+ setProducts(data[0].products_data);
+ setMaterials(data[0].materials_data);
+ showToast("已成功載入雲端最新資料！");
+ }
+ } catch (err) {
+ console.error("連線資料庫失敗:", err);
+ }
+ }
+ fetchLatestData();
+ }, []);
 
-    const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
+ // 【雲端功能】將最新狀態儲存到資料庫
+ async function saveToSupabase(updatedProducts, updatedMaterials) {
+ const { error } = await supabase
+ .from('bom_snapshots')
+ .insert([{ products_data: updatedProducts, materials_data: updatedMaterials }]);
+ if (error) console.error("同步至雲端失敗:", error);
+ }
 
-    const INITIAL_MATERIALS = {
-      'pt-891': { id: 'pt-891', name: '鋁管、積層管', dueDate: '2026/08/15', memo: '', projects: {} },
-      'Pit-521': { id: 'Pit-521', name: '仿單', dueDate: '2026/09/01', memo: '', projects: {} }
-    };
+ const exportCSV = () => {
+ const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
+ let csvRows = "";
+ 
+ products.forEach(p => {
+ p.specs.forEach(s => {
+ s.materialIds.forEach(mId => {
+ const m = materials[mId];
+ const row = [
+ p.code, p.name, s.code, s.name, m.name, m.id, m.dueDate,
+ STATUS_CONFIG[m.projects['B1F整改'] || 'pending']?.label,
+ STATUS_CONFIG[m.projects['IWKA轉移'] || 'pending']?.label,
+ STATUS_CONFIG[m.projects['仿單格式化'] || 'pending']?.label,
+ STATUS_CONFIG[m.projects['處方藥電子仿單'] || 'pending']?.label,
+ STATUS_CONFIG[m.projects['OTC變更'] || 'pending']?.label,
+ m.memo
+ ];
+ csvRows += row.join('\t') + "\r\n";
+ });
+ });
+ });
+ const fullContent = headers + csvRows;
+ const buffer = new ArrayBuffer(fullContent.length * 2 + 2);
+ const view = new DataView(buffer);
+ view.setUint16(0, 0xFEFF, true);
+ for (let i = 0; i < fullContent.length; i++) {
+ view.setUint16(i * 2 + 2, fullContent.charCodeAt(i), true);
+ }
+ 
+ const blob = new Blob([view], { type: "application/octet-stream" });
+ const link = document.createElement("a");
+ link.href = URL.createObjectURL(blob);
+ link.download = `整合資料匯出_${new Date().toLocaleDateString().replace(/\//g, '')}.csv`;
+ document.body.appendChild(link);
+ link.click();
+ document.body.removeChild(link);
+ showToast("資料匯出成功！");
+ };
 
-    const INITIAL_PRODUCTS = [
-      {
-        code: '021', name: '杏聯乳膏',
-        specs: [
-          {
-            code: '02123', name: '10g',
-            materialIds: ['pt-891', 'Pit-521']
-          }
-        ]
-      }
-    ];
+ const downloadSampleCSV = () => {
+ const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
+ const sampleRows = "021\t杏聯乳膏\t02123\t10g\t鋁管\tpt-891\t2026/08/15\t待改版\t待改版\tNA\tNA\t待改版\t測試備註\r\n";
+ const csvContent = headers + sampleRows;
+ 
+ const buffer = new ArrayBuffer(csvContent.length * 2 + 2);
+ const view = new DataView(buffer);
+ view.setUint16(0, 0xFEFF, true); 
+ for (let i = 0; i < csvContent.length; i++) {
+ view.setUint16(i * 2 + 2, csvContent.charCodeAt(i), true);
+ }
+ 
+ const blob = new Blob([view], { type: "application/octet-stream" });
+ const link = document.createElement("a");
+ link.href = URL.createObjectURL(blob);
+ link.download = "BOM_匯入範本_第二版.csv";
+ document.body.appendChild(link);
+ link.click();
+ document.body.removeChild(link);
+ };
 
-    function App() {
-      const [products, setProducts] = useState(INITIAL_PRODUCTS);
-      const [materials, setMaterials] = useState(INITIAL_MATERIALS);
-      const [searchTerm, setSearchTerm] = useState('');
-      const [expandedProducts, setExpandedProducts] = useState([]);
-      const [expandedSpecs, setExpandedSpecs] = useState([]);
-      const [toastMessage, setToastMessage] = useState(null);
-      const fileInputRef = useRef(null);
+ const parseStatus = (rawStr) => {
+ const s = String(rawStr).toLowerCase().trim();
+ if (s.includes('na') || s.includes('無須執行')) return 'na';
+ if (s.includes('待改版') || s.includes('pending')) return 'pending';
+ if (s.includes('改版中') || s.includes('revising')) return 'revising';
+ if (s.includes('會簽中') || s.includes('signing')) return 'signing';
+ if (s.includes('已發檔') || s.includes('released')) return 'released';
+ return 'pending';
+ };
 
-      const showToast = (message, type = 'success') => {
-        setToastMessage({ message, type });
-        setTimeout(() => setToastMessage(null), 3000);
-      };
+ const getAutoMaterialName = (code, rawName) => {
+ if (!code) return rawName;
+ const upperCode = String(code).toUpperCase();
+ if (upperCode.startsWith('PB')) return '支裝盒';
+ if (upperCode.startsWith('PT')) return '鋁管、積層管';
+ if (upperCode.startsWith('PI')) return '仿單';
+ if (upperCode.startsWith('PF4')) return 'PTP';
+ if (upperCode.startsWith('PF1')) return '套標';
+ if (upperCode.startsWith('PL')) return '標籤';
+ return rawName && rawName.trim() !== '' ? rawName : '未分類';
+ };
 
-      const exportCSV = () => {
-        const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
-        let csvRows = "";
-        
-        products.forEach(p => {
-          p.specs.forEach(s => {
-            s.materialIds.forEach(mId => {
-              const m = materials[mId];
-              const row = [
-                p.code, p.name, s.code, s.name, m.name, m.id, m.dueDate,
-                STATUS_CONFIG[m.projects['B1F整改'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['IWKA轉移'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['仿單格式化'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['處方藥電子仿單'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['OTC變更'] || 'pending']?.label,
-                m.memo
-              ];
-              csvRows += row.join('\t') + "\r\n";
-            });
-          });
-        });
-
-        const fullContent = headers + csvRows;
-        const buffer = new ArrayBuffer(fullContent.length * 2 + 2);
-        const view = new DataView(buffer);
-        view.setUint16(0, 0xFEFF, true);
-        for (let i = 0; i < fullContent.length; i++) {
-          view.setUint16(i * 2 + 2, fullContent.charCodeAt(i), true);
-        }
-        
-        const blob = new Blob([view], { type: "application/octet-stream" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `整合資料匯出_${new Date().toLocaleDateString().replace(/\//g, '')}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showToast("資料匯出成功！");
-      };
-
-      const downloadSampleCSV = () => {
-        const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
-        const sampleRows = "021\t杏聯乳膏\t02123\t10g\t鋁管\tpt-891\t2026/08/15\t待改版\t待改版\tNA\tNA\t待改版\t測試備註\r\n";
-        const csvContent = headers + sampleRows;
-        
-        const buffer = new ArrayBuffer(csvContent.length * 2 + 2);
-        const view = new DataView(buffer);
-        view.setUint16(0, 0xFEFF, true); 
-        for (let i = 0; i < csvContent.length; i++) {
-          view.setUint16(i * 2 + 2, csvContent.charCodeAt(i), true);
-        }
-        
-        const blob = new Blob([view], { type: "application/octet-stream" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "BOM_匯入範本_第二版.csv";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
-
-      const parseStatus = (rawStr) => {
-        const s = String(rawStr).toLowerCase().trim();
-        if (s.includes('na') || s.includes('無須執行')) return 'na';
-        if (s.includes('待改版') || s.includes('pending')) return 'pending';
-        if (s.includes('改版中') || s.includes('revising')) return 'revising';
-        if (s.includes('會簽中') || s.includes('signing')) return 'signing';
-        if (s.includes('已發檔') || s.includes('released')) return 'released';
-        return 'pending';
-      };
-
-      const getAutoMaterialName = (code, rawName) => {
-        if (!code) return rawName;
-        const upperCode = String(code).toUpperCase();
-        if (upperCode.startsWith('PB')) return '支裝盒';
-        if (upperCode.startsWith('PT')) return '鋁管、積層管';
-        if (upperCode.startsWith('PI')) return '仿單';
-        if (upperCode.startsWith('PF4')) return 'PTP';
-        if (upperCode.startsWith('PF1')) return '套標';
-        if (upperCode.startsWith('PL')) return '標籤';
-        return rawName && rawName.trim() !== '' ? rawName : '未分類';
-      };
-
-      const processCSV = (csvText) => {
-        const lines = csvText.split(/\r?\n/).slice(1).filter(line => line.trim() !== '');
-        const newProducts = JSON.parse(JSON.stringify(products));
-        const newMaterials = { ...materials };
-
-        let lastPCode = '';
-        let lastPName = '';
-        let lastSCode = '';
-        let lastSName = '';
-
-        lines.forEach(line => {
-          const delimiter = line.includes('\t') ? '\t' : ',';
-          const row = line.split(delimiter).map(item => item.replace(/^["']|["']$/g, '').trim());
-
-          while (row.length < 13) row.push('');
-          
-          let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
-          
-          if (!mCode) return; 
-
-          // 處理 Excel 科學記號 (例如 3.80E+03 -> 3800)
-          if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
-            sCode = String(Number(sCode));
-          }
-
-          if (sCode) {
-            sCode = String(sCode).trim();
-            // 處理被 Excel 截掉前導 0 的情況：如果全是數字且少於5碼，自動補齊5碼 (例如 8105 -> 08105)
-            if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) {
-              sCode = sCode.padStart(5, '0');
-            }
-          }
-
-          if (pCode) {
-             pCode = String(pCode).trim();
-          }
-
-          // 【新增功能】如果沒有產品3碼，但有規格5碼，自動擷取規格的前3碼作為產品3碼歸類
-          if (!pCode && sCode && sCode.length >= 3) {
-            pCode = sCode.substring(0, 3);
-          }
-
-          // 向下繼承邏輯
-          if (pCode) {
-            if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
-            // 嘗試繼承名稱
-            if (!pName && pCode === lastPCode) {
-              pName = lastPName;
-            }
-            lastPCode = pCode;
-            lastPName = pName || '';
-          } else {
-            pCode = lastPCode;
-            pName = lastPName;
-          }
-
-          if (sCode) {
-            if (!sName && sCode === lastSCode) {
-              sName = lastSName;
-            }
-            lastSCode = sCode;
-            lastSName = sName || '';
-          } else {
-            sCode = lastSCode;
-            sName = lastSName;
-          }
-
-          // 防呆預設值
-          if (!pCode) pCode = "未分類產品";
-          if (!sCode) sCode = "未分類規格";
-
-          const mName = getAutoMaterialName(mCode, rawMName);
-
-          let prod = newProducts.find(p => p.code === pCode);
-          if (!prod) { prod = { code: pCode, name: pName, specs: [] }; newProducts.push(prod); }
-          
-          let spec = prod.specs.find(s => s.code === sCode);
-          if (!spec) { spec = { code: sCode, name: sName, materialIds: [] }; prod.specs.push(spec); }
-          
-          if (!spec.materialIds.includes(mCode)) {
-            spec.materialIds.push(mCode);
-          }
-
-          let isNewMaterial = false;
-          if (!newMaterials[mCode]) {
-            newMaterials[mCode] = { id: mCode, name: mName, dueDate, memo, projects: {} };
-            isNewMaterial = true;
-          } else {
-            newMaterials[mCode].name = mName;
-            newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
-            newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
-          }
-
-          const assignProjectStatus = (projKey, rawVal) => {
-            const isEmpty = !rawVal || String(rawVal).trim() === '';
-            if (isEmpty) {
-              if (isNewMaterial) newMaterials[mCode].projects[projKey] = 'na';
-            } else {
-              newMaterials[mCode].projects[projKey] = parseStatus(rawVal);
-            }
-          };
-
-          assignProjectStatus('B1F整改', b1f);
-          assignProjectStatus('IWKA轉移', iwka);
-          assignProjectStatus('仿單格式化', leaf);
-          assignProjectStatus('處方藥電子仿單', qr);
-          assignProjectStatus('OTC變更', otc);
-        });
-
-        setProducts(newProducts);
-        setMaterials(newMaterials);
-        setExpandedProducts([]);
-        setExpandedSpecs([]);
-        showToast("資料匯入成功，已自動辨別材料名稱與進度整合！");
-      };
-
-      const handleFileUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const buffer = event.target.result;
-          const uint8Array = new Uint8Array(buffer);
-          let text = '';
-          if (uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xFE) {
-            text = new TextDecoder('utf-16le').decode(uint8Array);
-          } else if (uint8Array.length >= 3 && uint8Array[0] === 0xEF && uint8Array[1] === 0xBB && uint8Array[2] === 0xBF) {
-            text = new TextDecoder('utf-8').decode(uint8Array);
-          } else {
-            text = new TextDecoder('big5').decode(uint8Array); 
-          }
-          processCSV(text);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-        };
-        reader.readAsArrayBuffer(file);
-      };
-
-      const handleDueDateChange = (pCode, sCode, mId, newDate) => {
-        const formattedDate = newDate ? newDate.replace(/-/g, '/') : '';
-        setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], dueDate: formattedDate } }));
-      };
-
-      const handleMemoChange = (pCode, sCode, mId, newMemo) => {
-        setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], memo: newMemo } }));
-      };
-
-      const cycleStatus = (materialId, project) => {
-        setMaterials(prev => {
-          const currentStatus = prev[materialId].projects[project] || 'pending';
-          const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
-          const nextStatus = STATUS_SEQUENCE[(currentIndex + 1) % STATUS_SEQUENCE.length];
-          return { ...prev, [materialId]: { ...prev[materialId], projects: { ...prev[materialId].projects, [project]: nextStatus } } };
-        });
-      };
-
-      const formatDateForInput = (dateStr) => {
-        if (!dateStr || dateStr === '-') return '';
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-          const [y, m, d] = parts;
-          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-        }
-        return dateStr;
-      };
-
-      const uniqueMaterials = useMemo(() => Object.values(materials), [materials]);
-      
-      const sharedMaterialsMap = useMemo(() => {
-        const counts = {};
-        products.forEach(p => p.specs.forEach(s => s.materialIds.forEach(mId => {
-          counts[mId] = (counts[mId] || 0) + 1;
-        })));
-        return counts;
-      }, [products]);
-
-      const statuses = useMemo(() => {
-        const s = {};
-        Object.values(materials).forEach(mat => {
-          PROJECTS.forEach(proj => {
-            s[`${mat.id}_${proj}`] = mat.projects[proj] || 'pending';
-          });
-        });
-        return s;
-      }, [materials]);
-
-      const dashboardStats = useMemo(() => {
-        return PROJECTS.map(proj => {
-          const mats = uniqueMaterials;
-          const active = mats.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') !== 'na');
-          const done = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'released');
-          return { 
-            name: proj, total: active.length, done: done.length, 
-            percentage: active.length ? Math.round((done.length / active.length) * 100) : 0,
-            ...PROJECT_CONFIG[proj] 
-          };
-        });
-      }, [statuses, uniqueMaterials]);
-
-      const filteredData = useMemo(() => {
-        const hydratedData = products.map(product => ({
-          ...product,
-          specs: product.specs.map(spec => ({
-            ...spec,
-            materials: spec.materialIds.map(id => materials[id]).filter(Boolean)
-          }))
-        }));
-        
-        if (!searchTerm.trim()) return hydratedData;
-        const lowerTerm = searchTerm.toLowerCase();
-        
-        return hydratedData.map(product => {
-          const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
-          const filteredSpecs = product.specs.map(spec => {
-            const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
-            const filteredMaterials = spec.materials.filter(mat => 
-              mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
-            );
-            if (productMatch || specMatch || filteredMaterials.length > 0) {
-              return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
-            }
-            return null;
-          }).filter(Boolean);
-          
-          if (productMatch || filteredSpecs.length > 0) {
-            return { ...product, specs: filteredSpecs.length > 0 ? filteredSpecs : product.specs };
-          }
-          return null;
-        }).filter(Boolean);
-      }, [searchTerm, products, materials]);
-
-      return (
-        <div className="min-h-screen bg-slate-50 p-8 font-sans pb-24">
-          <div className="max-w-7xl mx-auto space-y-6">
-            {toastMessage && (
-              <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all duration-300 ${toastMessage.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
-                {toastMessage.type === 'error' ? <i className="fa-solid fa-circle-exclamation mr-2"></i> : <i className="fa-solid fa-circle-check mr-2 text-emerald-400"></i>}
-                {toastMessage.message}
-              </div>
-            )}
-
-            <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-              <div>
-                <h1 className="text-2xl font-bold flex items-center text-slate-900">
-                  <i className="fa-solid fa-box mr-2 text-indigo-600"></i> 包材整改專案追蹤系統
-                </h1>
-              </div>
-              <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
-                <div className="relative w-full md:w-64">
-                  <input type="text" placeholder="搜尋代碼、名稱..." className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                  <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
-                    <i className="fa-solid fa-download mr-1.5"></i> 下載範本
-                  </button>
-                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">
-                    <i className="fa-solid fa-database mr-1.5"></i> 匯出 CSV
-                  </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-                    <i className="fa-solid fa-upload mr-1.5"></i> 匯入報表
-                  </button>
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                </div>
-              </div>
-            </header>
-
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {dashboardStats.map(s => (
-                <div key={s.name} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-2">
-                      <div className={`p-2 w-8 h-8 flex items-center justify-center rounded-lg ${s.lightBg}`}>
-                        <i className={`${s.icon} ${s.textColor}`}></i>
-                      </div>
-                      <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
-                    </div>
-                    <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
-                    <div className={`h-2 ${s.color} transition-all duration-700 ease-out`} style={{ width: `${s.percentage}%` }}></div>
-                  </div>
-                  <div className="text-xs font-medium text-slate-500 flex justify-between">
-                    <span>任務完成數</span>
-                    <span className="text-slate-700">{s.done} <span className="text-slate-400 mx-0.5">/</span> {s.total}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-4">
-              {filteredData.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                  <i className="fa-solid fa-file-lines text-5xl text-slate-300 mx-auto mb-3 block"></i>
-                  <p className="text-slate-500">{searchTerm ? `找不到符合「${searchTerm}」的資料` : "目前沒有任何資料，請從右上角匯入 BOM 表"}</p>
-                </div>
-              ) : (
-                filteredData.map(prod => (
-                  <div key={prod.code} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <button onClick={() => setExpandedProducts(prev => prev.includes(prod.code) ? prev.filter(c => c !== prod.code) : [...prev, prod.code])} className="w-full px-6 py-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
-                      <div className="flex items-center space-x-3">
-                        {expandedProducts.includes(prod.code) ? <i className="fa-solid fa-chevron-down text-slate-400 w-4"></i> : <i className="fa-solid fa-chevron-right text-slate-400 w-4"></i>}
-                        <span className="font-mono bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-sm font-semibold">{prod.code}</span>
-                        <span className="text-lg font-bold text-slate-800">{prod.name}</span>
-                      </div>
-                      <div className="text-sm text-slate-500">共 {prod.specs.length} 個規格</div>
-                    </button>
-                    {expandedProducts.includes(prod.code) && (
-                      <div className="bg-slate-50/50 p-4 space-y-4">
-                        {prod.specs.map(spec => (
-                          <div key={spec.code} className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                            <button onClick={() => setExpandedSpecs(prev => prev.includes(spec.code) ? prev.filter(c => c !== spec.code) : [...prev, spec.code])} className="w-full px-4 py-3 flex items-center space-x-3 bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
-                              {expandedSpecs.includes(spec.code) ? <i className="fa-solid fa-chevron-down text-slate-400 w-3"></i> : <i className="fa-solid fa-chevron-right text-slate-400 w-3"></i>}
-                              <span className="font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-sm font-semibold">{spec.code}</span>
-                              <span className="font-medium text-slate-700">{spec.name}</span>
-                            </button>
-                            {expandedSpecs.includes(spec.code) && (
-                              <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full text-sm text-left whitespace-nowrap">
-                                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                                    <tr>
-                                      <th className="px-4 py-3 font-semibold min-w-[140px] sticky left-0 bg-slate-50 z-10 border-r border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">標示材料</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[120px]">料號</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[110px]"><i className="fa-regular fa-calendar text-slate-400 mr-1"></i>預計完成日</th>
-                                      {PROJECTS.map(proj => <th key={proj} className="px-4 py-3 font-semibold text-center min-w-[120px]">{proj}</th>)}
-                                      <th className="px-4 py-3 font-semibold min-w-[100px] text-center"><i className="fa-solid fa-link text-slate-400 mr-1"></i>共用物料</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[150px]"><i className="fa-regular fa-message text-slate-400 mr-1"></i>備註</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {spec.materials.map((mat, idx) => {
-                                      const isShared = sharedMaterialsMap[mat.id] > 1;
-                                      return (
-                                        <tr key={mat.id} className={`hover:bg-slate-50/80 transition-colors ${idx !== spec.materials.length - 1 ? 'border-b border-slate-100' : ''}`}>
-                                          <td className="px-4 py-3 font-medium text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">{mat.name}</td>
-                                          <td className="px-4 py-3 font-mono text-slate-500">{mat.id}</td>
-                                          <td className="px-4 py-3 text-slate-600 font-medium text-xs">
-                                            <input
-                                              type="date"
-                                              value={formatDateForInput(mat.dueDate)}
-                                              onChange={(e) => handleDueDateChange(prod.code, spec.code, mat.id, e.target.value)}
-                                              className="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white hover:bg-slate-50 transition-colors w-28 cursor-pointer text-slate-700"
-                                            />
-                                          </td>
-                                          {PROJECTS.map(proj => {
-                                            const status = statuses[`${mat.id}_${proj}`] || 'pending';
-                                            const statusInfo = STATUS_CONFIG[status];
-                                            return (
-                                              <td key={proj} className="px-4 py-3 text-center">
-                                                <button
-                                                  onClick={() => cycleStatus(mat.id, proj)}
-                                                  className={`inline-flex items-center justify-center w-full px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${statusInfo.color}`}
-                                                >
-                                                  {statusInfo.icon && <i className={`${statusInfo.icon} mr-1.5`}></i>}
-                                                  {statusInfo.label}
-                                                </button>
-                                              </td>
-                                            );
-                                          })}
-                                          <td className="px-4 py-3 text-center">
-                                            {isShared ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">Y</span> : <span className="text-slate-300 text-xs font-medium">N</span>}
-                                          </td>
-                                          <td className="px-4 py-3 text-slate-500 text-xs">
-                                            <input
-                                              type="text"
-                                              value={mat.memo || ''}
-                                              onChange={(e) => handleMemoChange(prod.code, spec.code, mat.id, e.target.value)}
-                                              placeholder="點擊新增備註..."
-                                              className="border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-transparent hover:bg-white focus:bg-white transition-all w-full min-w-[150px] max-w-[250px] text-slate-700"
-                                            />
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+ const processCSV = (csvText) => {
+ const lines = csvText.split(/\r?\n/).slice(1).filter(line => line.trim() !== '');
+ const newProducts = JSON.parse(JSON.stringify(products));
+ const newMaterials = { ...materials };
+ let lastPCode = '';
+ let lastPName = '';
+ let lastSCode = '';
+ let lastSName = '';
+ lines.forEach(line => {
+ const delimiter = line.includes('\t') ? '\t' : ',';
+ const row = line.split(delimiter).map(item => item.replace(/^["']|["']$/g, '').trim());
+ while (row.length < 13) row.push('');
+ 
+ let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
+ 
+ if (!mCode) return; 
+ if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
+ sCode = String(Number(sCode));
+ }
+ if (sCode) {
+ sCode = String(sCode).trim();
+ if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) {
+ sCode = sCode.padStart(5, '0');
+ }
+ }
+ if (pCode) {
+ pCode = String(pCode).trim();
+ }
+ if (!pCode && sCode && sCode.length >= 3) {
+ pCode = sCode.substring(0, 3);
+ }
+ if (pCode) {
+ if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
+ if (!pName && pCode === lastPCode) {
+ pName = lastPName;
+ }
+ lastPCode = pCode;
+ lastPName = pName || '';
+ } else {
+ pCode = lastPCode;
+ pName = lastPName;
+ }
+ if (sCode) {
+ if (!sName && sCode === lastSCode) {
+ sName = lastSName;
+ }
+ lastSCode = sCode;
+ lastSName = sName || '';
+ } else {
+ sCode = lastSCode;
+ sName = lastSName;
+ }
+ if (!pCode) pCode = "未分類產品";
+ if (!sCode) sCode = "未分類規格";
+ const mName = getAutoMaterialName(mCode, rawMName);
+ let prod = newProducts.find(p => p.code === pCode);
+ if (!prod) { prod = { code: pCode, name: pName, specs: [] }; newProducts.push(prod); }
+ 
+ let spec = prod.specs.find(s => s.code === sCode);
+ if (!spec) { spec = { code: sCode, name: sName, materialIds: [] }; prod.specs.push(spec); }
+ 
+ if (!spec.materialIds.includes(mCode)) {
+ spec.materialIds.push(mCode);
+ }
+ let isNewMaterial = false;
+ if (!newMaterials[mCode]) {
+ newMaterials[mCode] = { id: mCode, name: mName, dueDate, memo, projects: {} };
+ isNewMaterial = true;
+ } else {
+ newMaterials[mCode].name = mName;
+ newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
+ newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
+ }
+ const assignProjectStatus = (projKey, rawVal) => {
+ const isEmpty = !rawVal || String(rawVal).trim() === '';
