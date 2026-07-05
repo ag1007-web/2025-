@@ -1,863 +1,850 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>包材整改專案追蹤系統</title>
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { ChevronRight, ChevronDown, Search, Box, FileText, CheckCircle2, Circle, QrCode, Upload, Download, AlertCircle, Calendar, MessageSquare, Link as LinkIcon, Settings, Repeat, Shield, PenTool, Clock, Database } from 'lucide-react';
+
+const PROJECTS = ["B1F整改", "IWKA轉移", "仿單格式化", "處方藥電子仿單", "OTC變更"];
+
+const PROJECT_CONFIG = {
+  'B1F整改': { color: 'bg-blue-500', textColor: 'text-blue-600', lightBg: 'bg-blue-50', icon: Settings },
+  'IWKA轉移': { color: 'bg-amber-500', textColor: 'text-amber-600', lightBg: 'bg-amber-50', icon: Repeat },
+  '仿單格式化': { color: 'bg-violet-500', textColor: 'text-violet-600', lightBg: 'bg-violet-50', icon: FileText },
+  '處方藥電子仿單': { color: 'bg-emerald-500', textColor: 'text-emerald-600', lightBg: 'bg-emerald-50', icon: QrCode },
+  'OTC變更': { color: 'bg-rose-500', textColor: 'text-rose-600', lightBg: 'bg-rose-50', icon: Shield }
+};
+
+const STATUS_CONFIG = {
+  'na': { label: '無須執行', color: 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-gray-200', icon: null },
+  'pending': { label: '待改版', color: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200', icon: <Circle className="w-3 h-3 mr-1" /> },
+  'revising': { label: '改版中', color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200', icon: <PenTool className="w-3 h-3 mr-1" /> },
+  'signing': { label: '確認單會簽中', color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200', icon: <Clock className="w-3 h-3 mr-1" /> },
+  'released': { label: '已發檔', color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200', icon: <CheckCircle2 className="w-3 h-3 mr-1" /> }
+};
+
+const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
+
+// --- Supabase 預設設定區 (您可以直接填入此處，或在網頁上點擊「資料庫連線」設定) ---
+const DEFAULT_SUPABASE_URL = ""; 
+const DEFAULT_SUPABASE_ANON_KEY = "";
+
+// 安全的環境變數讀取
+const getEnv = (key) => {
+  return '';
+};
+
+export default function App() {
+  const [products, setProducts] = useState([]);
+  const [materials, setMaterials] = useState({});
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedProducts, setExpandedProducts] = useState([]); 
+  const [expandedSpecs, setExpandedSpecs] = useState([]); 
+  const [toastMessage, setToastMessage] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSdkLoaded, setIsSdkLoaded] = useState(false);
   
-  <!-- 載入 Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  // Supabase 連線憑證狀態
+  const [supabaseUrl, setSupabaseUrl] = useState(() => {
+    return getEnv('VITE_SUPABASE_URL') || localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
+  });
+  const [supabaseKey, setSupabaseKey] = useState(() => {
+    return getEnv('VITE_SUPABASE_ANON_KEY') || localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY;
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const [isDbConnected, setIsDbConnected] = useState(false);
   
-  <!-- 載入 FontAwesome 6.4.0 圖示庫 -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- 載入 React 18 與 ReactDOM 18 -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- 載入 Babel (將 JSX 於瀏覽器端即時轉譯) -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  const fileInputRef = useRef(null);
 
-  <!-- 載入 Supabase JS SDK CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    .custom-scrollbar::-webkit-scrollbar { height: 8px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-  </style>
-</head>
-<body class="bg-slate-50 text-slate-800">
-
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useState, useMemo, useRef, useEffect } = React;
-
-    const PROJECTS = ["B1F整改", "IWKA轉移", "仿單格式化", "處方藥電子仿單", "OTC變更"];
-
-    const PROJECT_CONFIG = {
-      'B1F整改': { color: 'bg-blue-500', textColor: 'text-blue-600', lightBg: 'bg-blue-50', icon: 'fa-solid fa-gear' },
-      'IWKA轉移': { color: 'bg-amber-500', textColor: 'text-amber-600', lightBg: 'bg-amber-50', icon: 'fa-solid fa-repeat' },
-      '仿單格式化': { color: 'bg-violet-500', textColor: 'text-violet-600', lightBg: 'bg-violet-50', icon: 'fa-solid fa-file-lines' },
-      '處方藥電子仿單': { color: 'bg-emerald-500', textColor: 'text-emerald-600', lightBg: 'bg-emerald-50', icon: 'fa-solid fa-qrcode' },
-      'OTC變更': { color: 'bg-rose-500', textColor: 'text-rose-600', lightBg: 'bg-rose-50', icon: 'fa-solid fa-shield' }
+  // 1. 在瀏覽器動態載入 Supabase SDK 腳本以規避編譯打包問題
+  useEffect(() => {
+    if (window.supabase) {
+      setIsSdkLoaded(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+    script.async = true;
+    script.onload = () => {
+      setIsSdkLoaded(true);
     };
-
-    const STATUS_CONFIG = {
-      'na': { label: '無須執行', color: 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-gray-200', icon: null },
-      'pending': { label: '待改版', color: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200', icon: 'fa-regular fa-circle' },
-      'revising': { label: '改版中', color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200', icon: 'fa-solid fa-pen' },
-      'signing': { label: '確認單會簽中', color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200', icon: 'fa-regular fa-clock' },
-      'released': { label: '已發檔', color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200', icon: 'fa-solid fa-circle-check' }
+    script.onerror = () => {
+      showToast("Supabase SDK 載入失敗，請檢查網路連線", "error");
     };
+    document.body.appendChild(script);
+  }, []);
 
-    const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
+  // 2. 初始化或憑證改變時，建立 Supabase Client
+  const supabase = useMemo(() => {
+    if (!isSdkLoaded || !supabaseUrl || !supabaseKey) return null;
+    try {
+      return window.supabase.createClient(supabaseUrl, supabaseKey);
+    } catch (e) {
+      console.error("Supabase 初始化失敗", e);
+      return null;
+    }
+  }, [isSdkLoaded, supabaseUrl, supabaseKey]);
 
-    // --- Supabase 預設設定區 (亦可直接填於此處，或在網頁上點擊「資料庫連線」設定) ---
-    const DEFAULT_SUPABASE_URL = ""; 
-    const DEFAULT_SUPABASE_ANON_KEY = "";
+  const showToast = (message, type = 'success') => {
+    setToastMessage({ message, type });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
-    const INITIAL_MATERIALS = {
-      'pt-891': { id: 'pt-891', name: '鋁管、積層管', dueDate: '2026/08/15', memo: '', projects: {} },
-      'Pit-521': { id: 'Pit-521', name: '仿單', dueDate: '2026/09/01', memo: '', projects: {} }
-    };
+  // --- 從 Supabase 讀取並重構資料庫內容 ---
+  const fetchSupabaseData = async () => {
+    if (!supabase) {
+      setIsDbConnected(false);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('bom_items')
+        .select('*');
 
-    const INITIAL_PRODUCTS = [
-      {
-        code: '021', name: '杏聯乳膏',
-        specs: [
-          {
-            code: '02123', name: '10g',
-            materialIds: ['pt-891', 'Pit-521']
-          }
-        ]
-      }
-    ];
+      if (error) throw error;
 
-    function App() {
-      const [products, setProducts] = useState(INITIAL_PRODUCTS);
-      const [materials, setMaterials] = useState(INITIAL_MATERIALS);
-      const [searchTerm, setSearchTerm] = useState('');
-      const [expandedProducts, setExpandedProducts] = useState([]); 
-      const [expandedSpecs, setExpandedSpecs] = useState([]); 
-      const [toastMessage, setToastMessage] = useState(null);
-      const [isLoading, setIsLoading] = useState(false);
-      const [isSdkLoaded, setIsSdkLoaded] = useState(false);
-      
-      // Supabase 連線憑證狀態
-      const [supabaseUrl, setSupabaseUrl] = useState(() => {
-        return localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
-      });
-      const [supabaseKey, setSupabaseKey] = useState(() => {
-        return localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY;
-      });
-      const [showSettings, setShowSettings] = useState(false);
-      const [isDbConnected, setIsDbConnected] = useState(false);
-      
-      const fileInputRef = useRef(null);
+      const newProducts = [];
+      const newMaterials = {};
 
-      // 1. 動態驗證 Supabase CDN 是否順利載入
-      useEffect(() => {
-        if (window.supabase) {
-          setIsSdkLoaded(true);
-          return;
+      data.forEach(row => {
+        const pCode = row.product_code_3 || '未分類';
+        const pName = row.product_name || '';
+        const sCode = row.spec_code_5 || '未分類';
+        const sName = row.spec_name || '';
+        const mCode = row.material_code;
+        const mName = row.material_name || '';
+        const dueDate = row.due_date || '';
+        const memo = row.memo || '';
+
+        if (!mCode) return;
+
+        // 重構產品階層
+        let prod = newProducts.find(p => p.code === pCode);
+        if (!prod) {
+          prod = { code: pCode, name: pName, specs: [] };
+          newProducts.push(prod);
         }
-        const interval = setInterval(() => {
-          if (window.supabase) {
-            setIsSdkLoaded(true);
-            clearInterval(interval);
-          }
-        }, 100);
-        return () => clearInterval(interval);
-      }, []);
 
-      // 2. 當 SDK、URL、Key 均就緒時，實例化 Supabase Client
-      const supabase = useMemo(() => {
-        if (!isSdkLoaded || !supabaseUrl || !supabaseKey) return null;
-        try {
-          return window.supabase.createClient(supabaseUrl, supabaseKey);
-        } catch (e) {
-          console.error("Supabase 初始化失敗", e);
-          return null;
+        let spec = prod.specs.find(s => s.code === sCode);
+        if (!spec) {
+          spec = { code: sCode, name: sName, materialIds: [] };
+          prod.specs.push(spec);
         }
-      }, [isSdkLoaded, supabaseUrl, supabaseKey]);
 
-      const showToast = (message, type = 'success') => {
-        setToastMessage({ message, type });
-        setTimeout(() => setToastMessage(null), 3000);
-      };
-
-      // --- 從 Supabase 讀取並重構資料庫內容 ---
-      const fetchSupabaseData = async () => {
-        if (!supabase) {
-          setIsDbConnected(false);
-          return;
+        if (!spec.materialIds.includes(mCode)) {
+          spec.materialIds.push(mCode);
         }
-        setIsLoading(true);
-        try {
-          const { data, error } = await supabase
-            .from('bom_items')
-            .select('*');
 
-          if (error) throw error;
-
-          const newProducts = [];
-          const newMaterials = {};
-
-          data.forEach(row => {
-            const pCode = row.product_code_3 || '未分類';
-            const pName = row.product_name || '';
-            const sCode = row.spec_code_5 || '未分類';
-            const sName = row.spec_name || '';
-            const mCode = row.material_code;
-            const mName = row.material_name || '';
-            const dueDate = row.due_date || '';
-            const memo = row.memo || '';
-
-            if (!mCode) return;
-
-            // 重建產品與規格階層
-            let prod = newProducts.find(p => p.code === pCode);
-            if (!prod) {
-              prod = { code: pCode, name: pName, specs: [] };
-              newProducts.push(prod);
-            }
-
-            let spec = prod.specs.find(s => s.code === sCode);
-            if (!spec) {
-              spec = { code: sCode, name: sName, materialIds: [] };
-              prod.specs.push(spec);
-            }
-
-            if (!spec.materialIds.includes(mCode)) {
-              spec.materialIds.push(mCode);
-            }
-
-            // 重建物料字典 (Material Master)
-            if (!newMaterials[mCode]) {
-              newMaterials[mCode] = {
-                id: mCode,
-                name: mName,
-                dueDate: dueDate,
-                memo: memo,
-                projects: {
-                  'B1F整改': row.status_b1f || 'na',
-                  'IWKA轉移': row.status_iwka || 'na',
-                  '仿單格式化': row.status_format || 'na',
-                  '處方藥電子仿單': row.status_qrcode || 'na',
-                  'OTC變更': row.status_otc || 'na'
-                }
-              };
-            } else {
-              newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
-              newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
-            }
-          });
-
-          setProducts(newProducts);
-          setMaterials(newMaterials);
-          setIsDbConnected(true);
-        } catch (e) {
-          console.error(e);
-          setIsDbConnected(false);
-          showToast("資料庫同步失敗: " + e.message, "error");
-        } finally {
-          setIsLoading(false);
-        }
-      };
-
-      // 載入與連線切換時自動同步
-      useEffect(() => {
-        if (supabase) {
-          fetchSupabaseData();
-        }
-      }, [supabase]);
-
-      // 儲存雲端連線設定
-      const saveConnectionSettings = () => {
-        localStorage.setItem('supabase_url', supabaseUrl);
-        localStorage.setItem('supabase_key', supabaseKey);
-        setShowSettings(false);
-        showToast("連線設定已更新，正在嘗試同步雲端...");
-      };
-
-      // 清除連線設定回到離線模式
-      const clearConnectionSettings = () => {
-        localStorage.removeItem('supabase_url');
-        localStorage.removeItem('supabase_key');
-        setSupabaseUrl('');
-        setSupabaseKey('');
-        setIsDbConnected(false);
-        setProducts(INITIAL_PRODUCTS);
-        setMaterials(INITIAL_MATERIALS);
-        setShowSettings(false);
-        showToast("已清除連線設定，切換至離線展示模式");
-      };
-
-      // 下載標準 ERP 匯入範本 (UTF-16LE 解決 Excel 中文亂碼)
-      const downloadSampleCSV = () => {
-        const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
-        const sampleRows = "021\t杏聯乳膏\t02123\t10g\t鋁管\tpt-891\t2026/08/15\t待改版\t待改版\tNA\tNA\t待改版\t測試備註\r\n";
-        const csvContent = headers + sampleRows;
-        
-        const buffer = new ArrayBuffer(csvContent.length * 2 + 2);
-        const view = new DataView(buffer);
-        view.setUint16(0, 0xFEFF, true); 
-        for (let i = 0; i < csvContent.length; i++) {
-          view.setUint16(i * 2 + 2, csvContent.charCodeAt(i), true);
-        }
-        
-        const blob = new Blob([view], { type: "application/octet-stream" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "BOM_匯入範本_第二版.csv";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
-
-      // 整合資料匯出 CSV (UTF-16LE + Tab 分隔，確保舊版 Excel 雙擊自動分欄)
-      const exportCSV = () => {
-        const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
-        let csvRows = "";
-        
-        products.forEach(p => {
-          p.specs.forEach(s => {
-            s.materialIds.forEach(mId => {
-              const m = materials[mId];
-              const row = [
-                p.code, p.name, s.code, s.name, m.name, m.id, m.dueDate,
-                STATUS_CONFIG[m.projects['B1F整改'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['IWKA轉移'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['仿單格式化'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['處方藥電子仿單'] || 'pending']?.label,
-                STATUS_CONFIG[m.projects['OTC變更'] || 'pending']?.label,
-                m.memo
-              ];
-              csvRows += row.join('\t') + "\r\n";
-            });
-          });
-        });
-
-        const fullContent = headers + csvRows;
-        const buffer = new ArrayBuffer(fullContent.length * 2 + 2);
-        const view = new DataView(buffer);
-        view.setUint16(0, 0xFEFF, true);
-        for (let i = 0; i < fullContent.length; i++) {
-          view.setUint16(i * 2 + 2, fullContent.charCodeAt(i), true);
-        }
-        
-        const blob = new Blob([view], { type: "application/octet-stream" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `整合資料匯出_${new Date().toLocaleDateString().replace(/\//g, '')}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showToast("資料匯出成功！");
-      };
-
-      const parseStatus = (rawStr) => {
-        const s = String(rawStr).toLowerCase().trim();
-        if (s.includes('na') || s.includes('無須執行')) return 'na';
-        if (s.includes('待改版') || s.includes('pending')) return 'pending';
-        if (s.includes('改版中') || s.includes('revising')) return 'revising';
-        if (s.includes('會簽中') || s.includes('signing')) return 'signing';
-        if (s.includes('已發檔') || s.includes('released')) return 'released';
-        return 'pending';
-      };
-
-      // 自動料號前置首字辨別
-      const getAutoMaterialName = (code, rawName) => {
-        if (!code) return rawName;
-        const upperCode = String(code).toUpperCase();
-        if (upperCode.startsWith('PB')) return '支裝盒';
-        if (upperCode.startsWith('PT')) return '鋁管、積層管';
-        if (upperCode.startsWith('PI')) return '仿單';
-        if (upperCode.startsWith('PF4')) return 'PTP';
-        if (upperCode.startsWith('PF1')) return '套標';
-        if (upperCode.startsWith('PL')) return '標籤';
-        return rawName && rawName.trim() !== '' ? rawName : '未分類';
-      };
-
-      // 核心：CSV 智慧解碼、向下遞補與 5 碼轉 3 碼歸類
-      const processCSV = async (csvText) => {
-        const lines = csvText.split(/\r?\n/).slice(1).filter(line => line.trim() !== '');
-        const newProducts = JSON.parse(JSON.stringify(products));
-        const newMaterials = { ...materials };
-        const dbUpsertRows = [];
-
-        let lastPCode = '';
-        let lastPName = '';
-        let lastSCode = '';
-        let lastSName = '';
-
-        lines.forEach(line => {
-          const delimiter = line.includes('\t') ? '\t' : ',';
-          const row = line.split(delimiter).map(item => item.replace(/^["']|["']$/g, '').trim());
-
-          while (row.length < 13) row.push('');
-          
-          let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
-          
-          if (!mCode) return; 
-
-          // 處理 Excel 科學記號 (例如 3.80E+03 -> 3800)
-          if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
-            sCode = String(Number(sCode));
-          }
-
-          if (sCode) {
-            sCode = String(sCode).trim();
-            if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) {
-              sCode = sCode.padStart(5, '0');
-            }
-          }
-
-          if (pCode) {
-             pCode = String(pCode).trim();
-          }
-
-          // 【智慧修正】只要有產品 5 碼 (規格代碼)，自動截取前 3 碼做歸屬
-          if (!pCode && sCode && sCode.length >= 3) {
-            pCode = sCode.substring(0, 3);
-          }
-
-          // 向下遞補邏輯
-          if (pCode) {
-            if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
-            if (!pName && pCode === lastPCode) pName = lastPName;
-            lastPCode = pCode;
-            lastPName = pName || '';
-          } else {
-            pCode = lastPCode;
-            pName = lastPName;
-          }
-
-          if (sCode) {
-            if (!sName && sCode === lastSCode) sName = lastSName;
-            lastSCode = sCode;
-            lastSName = sName || '';
-          } else {
-            sCode = lastSCode;
-            sName = lastSName;
-          }
-
-          if (!pCode) pCode = "未分類產品";
-          if (!sCode) sCode = "未分類規格";
-
-          const mName = getAutoMaterialName(mCode, rawMName);
-
-          // 建構本地產品階層
-          let prod = newProducts.find(p => p.code === pCode);
-          if (!prod) { prod = { code: pCode, name: pName, specs: [] }; newProducts.push(prod); }
-          
-          let spec = prod.specs.find(s => s.code === sCode);
-          if (!spec) { spec = { code: sCode, name: sName, materialIds: [] }; prod.specs.push(spec); }
-          
-          if (!spec.materialIds.includes(mCode)) {
-            spec.materialIds.push(mCode);
-          }
-
-          let isNewMaterial = false;
-          if (!newMaterials[mCode]) {
-            newMaterials[mCode] = { id: mCode, name: mName, dueDate: dueDate, memo, projects: {} };
-            isNewMaterial = true;
-          } else {
-            newMaterials[mCode].name = mName;
-            newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
-            newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
-          }
-
-          const assignProjectStatus = (projKey, rawVal) => {
-            const isEmpty = !rawVal || String(rawVal).trim() === '';
-            if (isEmpty) {
-              if (isNewMaterial) newMaterials[mCode].projects[projKey] = 'na';
-            } else {
-              newMaterials[mCode].projects[projKey] = parseStatus(rawVal);
+        // 重構料號 Master
+        if (!newMaterials[mCode]) {
+          newMaterials[mCode] = {
+            id: mCode,
+            name: mName,
+            dueDate: dueDate,
+            memo: memo,
+            projects: {
+              'B1F整改': row.status_b1f || 'na',
+              'IWKA轉移': row.status_iwka || 'na',
+              '仿單格式化': row.status_format || 'na',
+              '處方藥電子仿單': row.status_qrcode || 'na',
+              'OTC變更': row.status_otc || 'na'
             }
           };
-
-          assignProjectStatus('B1F整改', b1f);
-          assignProjectStatus('IWKA轉移', iwka);
-          assignProjectStatus('仿單格式化', leaf);
-          assignProjectStatus('處方藥電子仿單', qr);
-          assignProjectStatus('OTC變更', otc);
-
-          dbUpsertRows.push({
-            composite_key: `${pCode}_${sCode}_${mCode}`,
-            product_code_3: pCode,
-            product_name: pName,
-            spec_code_5: sCode,
-            spec_name: sName,
-            material_name: mName,
-            material_code: mCode,
-            due_date: newMaterials[mCode].dueDate || '',
-            status_b1f: newMaterials[mCode].projects['B1F整改'] || 'na',
-            status_iwka: newMaterials[mCode].projects['IWKA轉移'] || 'na',
-            status_format: newMaterials[mCode].projects['仿單格式化'] || 'na',
-            status_qrcode: newMaterials[mCode].projects['處方藥電子仿單'] || 'na',
-            status_otc: newMaterials[mCode].projects['OTC變更'] || 'na',
-            memo: newMaterials[mCode].memo || ''
-          });
-        });
-
-        setProducts(newProducts);
-        setMaterials(newMaterials);
-        setExpandedProducts([]);
-        setExpandedSpecs([]);
-
-        if (supabase) {
-          setIsLoading(true);
-          try {
-            const { error } = await supabase
-              .from('bom_items')
-              .upsert(dbUpsertRows, { onConflict: 'composite_key' });
-
-            if (error) throw error;
-            showToast("資料匯入成功，已同步至 Supabase 雲端！");
-          } catch (e) {
-            console.error(e);
-            showToast("匯入成功，但同步雲端失敗: " + e.message, "error");
-          } finally {
-            setIsLoading(false);
-          }
         } else {
-          showToast("本地資料匯入成功！");
+          newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
+          newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
         }
-      };
+      });
 
-      const handleFileUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const buffer = event.target.result;
-          const uint8Array = new Uint8Array(buffer);
-          let text = '';
-          if (uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xFE) {
-            text = new TextDecoder('utf-16le').decode(uint8Array);
-          } else if (uint8Array.length >= 3 && uint8Array[0] === 0xEF && uint8Array[1] === 0xBB && uint8Array[2] === 0xBF) {
-            text = new TextDecoder('utf-8').decode(uint8Array);
-          } else {
-            text = new TextDecoder('big5').decode(uint8Array); 
-          }
-          processCSV(text);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-        };
-        reader.readAsArrayBuffer(file);
-      };
+      setProducts(newProducts);
+      setMaterials(newMaterials);
+      setIsDbConnected(true);
+    } catch (e) {
+      console.error(e);
+      setIsDbConnected(false);
+      showToast("資料庫同步失敗: " + e.message, "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      // 雲端資料同步更新
-      const syncSingleChangeToSupabase = async (mId, fieldsToUpdate) => {
-        if (!supabase) return;
-        try {
-          const { error } = await supabase
-            .from('bom_items')
-            .update(fieldsToUpdate)
-            .eq('material_code', mId);
+  // 網頁載入時自動同步雲端
+  useEffect(() => {
+    if (supabase) {
+      fetchSupabaseData();
+    }
+  }, [supabase]);
 
-          if (error) throw error;
-        } catch (e) {
-          console.error(e);
-          showToast("雲端同步失敗: " + e.message, "error");
-        }
-      };
+  // 儲存連線憑證至瀏覽器
+  const saveConnectionSettings = () => {
+    localStorage.setItem('supabase_url', supabaseUrl);
+    localStorage.setItem('supabase_key', supabaseKey);
+    setShowSettings(false);
+    showToast("連線設定已更新，正在嘗試同步雲端...");
+  };
 
-      const handleDueDateChange = (pCode, sCode, mId, newDate) => {
-        const formattedDate = newDate ? newDate.replace(/-/g, '/') : '';
-        setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], dueDate: formattedDate } }));
-        syncSingleChangeToSupabase(mId, { due_date: formattedDate });
-      };
+  const clearConnectionSettings = () => {
+    localStorage.removeItem('supabase_url');
+    localStorage.removeItem('supabase_key');
+    setSupabaseUrl('');
+    setSupabaseKey('');
+    setIsDbConnected(false);
+    setProducts([]);
+    setMaterials({});
+    setShowSettings(false);
+    showToast("已清除連線設定，切換至離線展示模式");
+  };
 
-      const handleMemoChange = (pCode, sCode, mId, newMemo) => {
-        setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], memo: newMemo } }));
-        syncSingleChangeToSupabase(mId, { memo: newMemo });
-      };
+  // 下載範本
+  const downloadSampleCSV = () => {
+    const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
+    const sampleRows = "021\t杏聯乳膏\t02123\t10g\t鋁管\tpt-891\t2026/08/15\t待改版\t待改版\tNA\tNA\t待改版\t測試備註\r\n";
+    const csvContent = headers + sampleRows;
+    
+    const buffer = new ArrayBuffer(csvContent.length * 2 + 2);
+    const view = new DataView(buffer);
+    view.setUint16(0, 0xFEFF, true); 
+    for (let i = 0; i < csvContent.length; i++) {
+      view.setUint16(i * 2 + 2, csvContent.charCodeAt(i), true);
+    }
+    
+    const blob = new Blob([view], { type: "application/octet-stream" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "BOM_匯入範本_第二版.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-      const cycleStatus = (materialId, project) => {
-        const projectColumns = {
-          'B1F整改': 'status_b1f',
-          'IWKA轉移': 'status_iwka',
-          '仿單格式化': 'status_format',
-          '處方藥電子仿單': 'status_qrcode',
-          'OTC變更': 'status_otc'
-        };
-
-        setMaterials(prev => {
-          const currentStatus = prev[materialId].projects[project] || 'pending';
-          const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
-          const nextStatus = STATUS_SEQUENCE[(currentIndex + 1) % STATUS_SEQUENCE.length];
-          
-          syncSingleChangeToSupabase(materialId, { [projectColumns[project]]: nextStatus });
-
-          return {
-            ...prev,
-            [materialId]: {
-              ...prev[materialId],
-              projects: {
-                ...prev[materialId].projects,
-                [project]: nextStatus
-              }
-            }
-          };
+  // 匯出功能
+  const exportCSV = () => {
+    const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
+    let csvRows = "";
+    
+    products.forEach(p => {
+      p.specs.forEach(s => {
+        s.materialIds.forEach(mId => {
+          const m = materials[mId];
+          const row = [
+            p.code, p.name, s.code, s.name, m.name, m.id, m.dueDate,
+            STATUS_CONFIG[m.projects['B1F整改'] || 'pending']?.label,
+            STATUS_CONFIG[m.projects['IWKA轉移'] || 'pending']?.label,
+            STATUS_CONFIG[m.projects['仿單格式化'] || 'pending']?.label,
+            STATUS_CONFIG[m.projects['處方藥電子仿單'] || 'pending']?.label,
+            STATUS_CONFIG[m.projects['OTC變更'] || 'pending']?.label,
+            m.memo
+          ];
+          csvRows += row.join('\t') + "\r\n";
         });
-      };
+      });
+    });
 
-      const formatDateForInput = (dateStr) => {
-        if (!dateStr || dateStr === '-') return '';
-        const clean = String(dateStr).trim().replace(/-/g, '/');
-        const parts = clean.split('/');
-        if (parts.length === 3) {
-          const y = parts[0];
-          const m = parts[1];
-          const d = parts[2];
-          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-          }
-        }
-        return '';
-      };
+    const fullContent = headers + csvRows;
+    const buffer = new ArrayBuffer(fullContent.length * 2 + 2);
+    const view = new DataView(buffer);
+    view.setUint16(0, 0xFEFF, true);
+    for (let i = 0; i < fullContent.length; i++) {
+      view.setUint16(i * 2 + 2, fullContent.charCodeAt(i), true);
+    }
+    
+    const blob = new Blob([view], { type: "application/octet-stream" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `整合資料匯出_${new Date().toLocaleDateString().replace(/\//g, '')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("資料匯出成功！");
+  };
 
-      const uniqueMaterials = useMemo(() => Object.values(materials), [materials]);
-      
-      const sharedMaterialsMap = useMemo(() => {
-        const counts = {};
-        products.forEach(p => p.specs.forEach(s => s.materialIds.forEach(mId => {
-          counts[mId] = (counts[mId] || 0) + 1;
-        })));
-        return counts;
-      }, [products]);
+  const parseStatus = (rawStr) => {
+    const s = String(rawStr).toLowerCase().trim();
+    if (s.includes('na') || s.includes('無須執行')) return 'na';
+    if (s.includes('待改版') || s.includes('pending')) return 'pending';
+    if (s.includes('改版中') || s.includes('revising')) return 'revising';
+    if (s.includes('會簽中') || s.includes('signing')) return 'signing';
+    if (s.includes('已發檔') || s.includes('released')) return 'released';
+    return 'pending';
+  };
 
-      const statuses = useMemo(() => {
-        const s = {};
-        Object.values(materials).forEach(mat => {
-          PROJECTS.forEach(proj => {
-            s[`${mat.id}_${proj}`] = mat.projects[proj] || 'pending';
-          });
-        });
-        return s;
-      }, [materials]);
+  const getAutoMaterialName = (code, rawName) => {
+    if (!code) return rawName;
+    const upperCode = String(code).toUpperCase();
+    if (upperCode.startsWith('PB')) return '支裝盒';
+    if (upperCode.startsWith('PT')) return '鋁管、積層管';
+    if (upperCode.startsWith('PI')) return '仿單';
+    if (upperCode.startsWith('PF4')) return 'PTP';
+    if (upperCode.startsWith('PF1')) return '套標';
+    if (upperCode.startsWith('PL')) return '標籤';
+    return rawName && rawName.trim() !== '' ? rawName : '未分類';
+  };
 
-      const dashboardStats = useMemo(() => {
-        return PROJECTS.map(proj => {
-          const mats = uniqueMaterials;
-          const active = mats.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') !== 'na');
-          const done = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'released');
-          return { 
-            name: proj, total: active.length, done: done.length, 
-            percentage: active.length ? Math.round((done.length / active.length) * 100) : 0,
-            ...PROJECT_CONFIG[proj] 
-          };
-        });
-      }, [statuses, uniqueMaterials]);
-
-      const filteredData = useMemo(() => {
-        const hydratedData = products.map(product => ({
-          ...product,
-          specs: product.specs.map(spec => ({
-            ...spec,
-            materials: spec.materialIds.map(id => materials[id]).filter(Boolean)
-          }))
-        }));
-        
-        if (!searchTerm.trim()) return hydratedData;
-        const lowerTerm = searchTerm.toLowerCase();
-        
-        return hydratedData.map(product => {
-          const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
-          const filteredSpecs = product.specs.map(spec => {
-            const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
-            const filteredMaterials = spec.materials.filter(mat => 
-              mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
-            );
-            if (productMatch || specMatch || filteredMaterials.length > 0) {
-              return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
-            }
-            return null;
-          }).filter(Boolean);
-          
-          if (productMatch || filteredSpecs.length > 0) {
-            return { ...product, specs: filteredSpecs.length > 0 ? filteredSpecs : product.specs };
-          }
-          return null;
-        }).filter(Boolean);
-      }, [searchTerm, products, materials]);
-
-      return (
-        <div className="min-h-screen bg-slate-50 p-8 font-sans pb-24 relative">
-          <div className="max-w-7xl mx-auto space-y-6">
-            
-            {toastMessage && (
-              <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all duration-300 ${toastMessage.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
-                {toastMessage.type === 'error' ? <i className="fa-solid fa-circle-exclamation mr-2"></i> : <i className="fa-solid fa-circle-check mr-2 text-emerald-400"></i>}
-                {toastMessage.message}
-              </div>
-            )}
-
-            {/* 雲端資料庫設定視窗 */}
-            {showSettings && (
-              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-4">
-                  <h2 className="text-xl font-bold flex items-center text-slate-900">
-                    <i className="fa-solid fa-database mr-2 text-indigo-600"></i> Supabase 雲端設定
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    請輸入您在 Supabase 的 Project API 憑證，將系統資料直接儲存在雲端。
-                  </p>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Project URL</label>
-                      <input 
-                        type="text" 
-                        placeholder="https://xxxx.supabase.co"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        value={supabaseUrl} 
-                        onChange={(e) => setSupabaseUrl(e.target.value)} 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Anon API Key</label>
-                      <input 
-                        type="password" 
-                        placeholder="eyJhbGciOi..."
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        value={supabaseKey} 
-                        onChange={(e) => setSupabaseKey(e.target.value)} 
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button 
-                      onClick={clearConnectionSettings} 
-                      className="flex-1 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      清除連線
-                    </button>
-                    <button 
-                      onClick={saveConnectionSettings} 
-                      className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      連線儲存
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-              <div>
-                <h1 className="text-2xl font-bold flex items-center text-slate-900">
-                  <i className="fa-solid fa-box mr-2 text-indigo-600 animate-pulse"></i>包材整改專案追蹤系統
-                  {isDbConnected ? (
-                    <span className="ml-3 text-xs font-bold bg-green-100 text-green-700 px-2.5 py-1 rounded-full border border-green-200 flex items-center">
-                      <i className="fa-solid fa-database mr-1"></i> Supabase 雲端同步中
-                    </span>
-                  ) : (
-                    <span className="ml-3 text-xs font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full border border-amber-200">
-                      離線體驗模式 (請連線資料庫)
-                    </span>
-                  )}
-                </h1>
-                <p className="text-sm text-slate-400 mt-1">目前資料庫共有 {uniqueMaterials.length} 筆包材料號</p>
-              </div>
-              <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
-                <div className="relative w-full md:w-64">
-                  <input type="text" placeholder="搜尋代碼、名稱..." className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                  <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300">
-                    <i className="fa-solid fa-database mr-1.5"></i> 連線設定
-                  </button>
-                  <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
-                    <i className="fa-solid fa-download mr-1.5"></i> 下載範本
-                  </button>
-                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">
-                    <i className="fa-solid fa-database mr-1.5"></i> 匯出 CSV
-                  </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-                    <i className="fa-solid fa-upload mr-1.5"></i> 匯入報表
-                  </button>
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                </div>
-              </div>
-            </header>
-
-            {isLoading && (
-              <div className="w-full bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-center justify-center text-indigo-700 text-sm font-semibold space-x-2 animate-pulse">
-                <i className="fa-solid fa-database mr-1.5 animate-bounce"></i>
-                <span>資料庫同步更新中，請稍候...</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {dashboardStats.map(s => (
-                <div key={s.name} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-2">
-                      <div className={`p-2 rounded-lg ${s.lightBg}`}>
-                        <i className={`${s.icon} ${s.textColor}`}></i>
-                      </div>
-                      <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
-                    </div>
-                    <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
-                    <div className={`h-2 ${s.color} transition-all duration-700 ease-out`} style={{ width: `${s.percentage}%` }}></div>
-                  </div>
-                  <div className="text-xs font-medium text-slate-500 flex justify-between">
-                    <span>任務完成數</span>
-                    <span className="text-slate-700">{s.done} <span className="text-slate-400 mx-0.5">/</span> {s.total}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-4">
-              {filteredData.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                  <i className="fa-solid fa-file-lines text-5xl text-slate-300 mx-auto mb-3 block"></i>
-                  <p className="text-slate-500">{searchTerm ? `找不到符合「${searchTerm}」的資料` : "目前沒有任何資料，請連接資料庫並匯入 BOM 表"}</p>
-                </div>
-              ) : (
-                filteredData.map(prod => (
-                  <div key={prod.code} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <button onClick={() => setExpandedProducts(prev => prev.includes(prod.code) ? prev.filter(c => c !== prod.code) : [...prev, prod.code])} className="w-full px-6 py-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
-                      <div className="flex items-center space-x-3">
-                        {expandedProducts.includes(prod.code) ? <i className="fa-solid fa-chevron-down text-slate-400 w-4"></i> : <i className="fa-solid fa-chevron-right text-slate-400 w-4"></i>}
-                        <span className="font-mono bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-sm font-semibold">{prod.code}</span>
-                        <span className="text-lg font-bold text-slate-800">{prod.name}</span>
-                      </div>
-                      <div className="text-sm text-slate-500">共 {prod.specs.length} 個規格</div>
-                    </button>
-                    {expandedProducts.includes(prod.code) && (
-                      <div className="bg-slate-50/50 p-4 space-y-4">
-                        {prod.specs.map(spec => (
-                          <div key={spec.code} className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                            <button onClick={() => setExpandedSpecs(prev => prev.includes(spec.code) ? prev.filter(c => c !== spec.code) : [...prev, spec.code])} className="w-full px-4 py-3 flex items-center space-x-3 bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
-                              {expandedSpecs.includes(spec.code) ? <i className="fa-solid fa-chevron-down text-slate-400 w-4"></i> : <i className="fa-solid fa-chevron-right text-slate-400 w-4"></i>}
-                              <span className="font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-sm font-semibold">{spec.code}</span>
-                              <span className="font-medium text-slate-700">{spec.name}</span>
-                            </button>
-                            {expandedSpecs.includes(spec.code) && (
-                              <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full text-sm text-left whitespace-nowrap">
-                                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                                    <tr>
-                                      <th className="px-4 py-3 font-semibold min-w-[140px] sticky left-0 bg-slate-50 z-10 border-r border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">標示材料</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[120px]">料號</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[110px]"><i className="fa-regular fa-calendar text-slate-400 mr-1"></i>預計完成日</th>
-                                      {PROJECTS.map(proj => <th key={proj} className="px-4 py-3 font-semibold text-center min-w-[120px]">{proj}</th>)}
-                                      <th className="px-4 py-3 font-semibold min-w-[100px] text-center"><i className="fa-solid fa-link text-slate-400 mr-1"></i>共用物料</th>
-                                      <th className="px-4 py-3 font-semibold min-w-[150px]"><i className="fa-regular fa-message text-slate-400 mr-1"></i>備註</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {spec.materials.map((mat, idx) => {
-                                      const isShared = sharedMaterialsMap[mat.id] > 1;
-                                      return (
-                                        <tr key={mat.id} className={`hover:bg-slate-50/80 transition-colors ${idx !== spec.materials.length - 1 ? 'border-b border-slate-100' : ''}`}>
-                                          <td className="px-4 py-3 font-medium text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">{mat.name}</td>
-                                          <td className="px-4 py-3 font-mono text-slate-500">{mat.id}</td>
-                                          <td className="px-4 py-3 text-slate-600 font-medium text-xs">
-                                            <input
-                                              type="date"
-                                              value={formatDateForInput(mat.dueDate)}
-                                              onChange={(e) => handleDueDateChange(prod.code, spec.code, mat.id, e.target.value)}
-                                              className="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white hover:bg-slate-50 transition-colors w-28 cursor-pointer text-slate-700"
-                                            />
-                                          </td>
-                                          {PROJECTS.map(proj => {
-                                            const status = statuses[`${mat.id}_${proj}`] || 'pending';
-                                            const statusInfo = STATUS_CONFIG[status];
-                                            return (
-                                              <td key={proj} className="px-4 py-3 text-center">
-                                                <button
-                                                  onClick={() => cycleStatus(mat.id, proj)}
-                                                  className={`inline-flex items-center justify-center w-full px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${statusInfo.color}`}
-                                                >
-                                                  {statusInfo.icon && <i className={`${statusInfo.icon} mr-1.5`}></i>}
-                                                  {statusInfo.label}
-                                                </button>
-                                              </td>
-                                            );
-                                          })}
-                                          <td className="px-4 py-3 text-center">
-                                            {isShared ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">Y</span> : <span className="text-slate-300 text-xs font-medium">N</span>}
-                                          </td>
-                                          <td className="px-4 py-3 text-slate-500 text-xs">
-                                            <input
-                                              type="text"
-                                              value={mat.memo || ''}
-                                              onChange={(e) => handleMemoChange(prod.code, spec.code, mat.id, e.target.value)}
-                                              placeholder="點擊新增備註..."
-                                              className="border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-transparent hover:bg-white focus:bg-white transition-all w-full min-w-[150px] max-w-[250px] text-slate-700"
-                                            />
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      );
+  // CSV 智慧解析與寫入，整合最相容的 delete-then-insert 機制
+  const processCSV = async (csvText) => {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length <= 1) {
+      showToast("上傳的檔案無有效資料列！", "error");
+      return;
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+    // 1. 動態偵測最精準的分隔符 (偵測首行逗號、分號、Tab的分布量)
+    const headerLine = lines[0];
+    let delimiter = ',';
+    const delimiters = ['\t', ',', ';'];
+    let maxCount = -1;
+    delimiters.forEach(d => {
+      const count = (headerLine.split(d).length - 1);
+      if (count > maxCount) {
+        maxCount = count;
+        delimiter = d;
+      }
+    });
+
+    const dataLines = lines.slice(1);
+    const newProducts = JSON.parse(JSON.stringify(products));
+    const newMaterials = { ...materials };
+    const dbUpsertRows = [];
+
+    let lastPCode = '';
+    let lastPName = '';
+    let lastSCode = '';
+    let lastSName = '';
+
+    dataLines.forEach(line => {
+      const row = line.split(delimiter).map(item => item.replace(/^["']|["']$/g, '').trim());
+
+      while (row.length < 13) row.push('');
+      
+      let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
+      
+      if (!mCode) return; 
+
+      if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
+        sCode = String(Number(sCode));
+      }
+
+      if (sCode) {
+        sCode = String(sCode).trim();
+        if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) {
+          sCode = sCode.padStart(5, '0');
+        }
+      }
+
+      if (pCode) {
+         pCode = String(pCode).trim();
+      }
+
+      if (!pCode && sCode && sCode.length >= 3) {
+        pCode = sCode.substring(0, 3);
+      }
+
+      if (pCode) {
+        if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
+        if (!pName && pCode === lastPCode) pName = lastPName;
+        lastPCode = pCode;
+        lastPName = pName || '';
+      } else {
+        pCode = lastPCode;
+        pName = lastPName;
+      }
+
+      if (sCode) {
+        if (!sName && sCode === lastSCode) sName = lastSName;
+        lastSCode = sCode;
+        lastSName = sName || '';
+      } else {
+        sCode = lastSCode;
+        sName = lastSName;
+      }
+
+      if (!pCode) pCode = "未分類產品";
+      if (!sCode) sCode = "未分類規格";
+
+      const mName = getAutoMaterialName(mCode, rawMName);
+
+      // 本地 React 狀態建構
+      let prod = newProducts.find(p => p.code === pCode);
+      if (!prod) { prod = { code: pCode, name: pName, specs: [] }; newProducts.push(prod); }
+      
+      let spec = prod.specs.find(s => s.code === sCode);
+      if (!spec) { spec = { code: sCode, name: sName, materialIds: [] }; prod.specs.push(spec); }
+      
+      if (!spec.materialIds.includes(mCode)) {
+        spec.materialIds.push(mCode);
+      }
+
+      let isNewMaterial = false;
+      if (!newMaterials[mCode]) {
+        newMaterials[mCode] = { id: mCode, name: mName, dueDate: dueDate, memo, projects: {} };
+        isNewMaterial = true;
+      } else {
+        newMaterials[mCode].name = mName;
+        newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
+        newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
+      }
+
+      const assignProjectStatus = (projKey, rawVal) => {
+        const isEmpty = !rawVal || String(rawVal).trim() === '';
+        if (isEmpty) {
+          if (isNewMaterial) newMaterials[mCode].projects[projKey] = 'na';
+        } else {
+          newMaterials[mCode].projects[projKey] = parseStatus(rawVal);
+        }
+      };
+
+      assignProjectStatus('B1F整改', b1f);
+      assignProjectStatus('IWKA轉移', iwka);
+      assignProjectStatus('仿單格式化', leaf);
+      assignProjectStatus('處方藥電子仿單', qr);
+      assignProjectStatus('OTC變更', otc);
+
+      // 產生 Supabase 專用批次 Upsert 資料列
+      dbUpsertRows.push({
+        composite_key: `${pCode}_${sCode}_${mCode}`,
+        product_code_3: pCode,
+        product_name: pName,
+        spec_code_5: sCode,
+        spec_name: sName,
+        material_name: mName,
+        material_code: mCode,
+        due_date: newMaterials[mCode].dueDate || '',
+        status_b1f: newMaterials[mCode].projects['B1F整改'] || 'na',
+        status_iwka: newMaterials[mCode].projects['IWKA轉移'] || 'na',
+        status_format: newMaterials[mCode].projects['仿單格式化'] || 'na',
+        status_qrcode: newMaterials[mCode].projects['處方藥電子仿單'] || 'na',
+        status_otc: newMaterials[mCode].projects['OTC變更'] || 'na',
+        memo: newMaterials[mCode].memo || ''
+      });
+    });
+
+    if (dbUpsertRows.length === 0) {
+      showToast("匯入失敗：找不到任何含有「料號」欄位的有效資料列", "error");
+      return;
+    }
+
+    // 先行更新本地 UI
+    setProducts(newProducts);
+    setMaterials(newMaterials);
+    setExpandedProducts([]);
+    setExpandedSpecs([]);
+
+    // 同步上傳至 Supabase 雲端
+    if (supabase) {
+      setIsLoading(true);
+      try {
+        const keysToDelete = dbUpsertRows.map(r => r.composite_key);
+        
+        // 1. 批次刪除現有的重複項目（防止 upsert 遭遇 RLS 或缺少 unique constraint 限制而報錯）
+        if (keysToDelete.length > 0) {
+          const { error: delError } = await supabase
+            .from('bom_items')
+            .delete()
+            .in('composite_key', keysToDelete);
+          if (delError) throw delError;
+        }
+
+        // 2. 批次寫入新數據
+        const { error: insError } = await supabase
+          .from('bom_items')
+          .insert(dbUpsertRows);
+        
+        if (insError) throw insError;
+
+        showToast("資料匯入成功，已同步至 Supabase 雲端！");
+      } catch (e) {
+        console.error("雲端寫入發生異常：", e);
+        showToast("本地匯入成功，但同步雲端失敗: " + e.message, "error");
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      showToast("本地資料匯入成功！");
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const buffer = event.target.result;
+      const uint8Array = new Uint8Array(buffer);
+      let text = '';
+      if (uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xFE) {
+        text = new TextDecoder('utf-16le').decode(uint8Array);
+      } else if (uint8Array.length >= 3 && uint8Array[0] === 0xEF && uint8Array[1] === 0xBB && uint8Array[2] === 0xBF) {
+        text = new TextDecoder('utf-8').decode(uint8Array);
+      } else {
+        text = new TextDecoder('big5').decode(uint8Array); 
+      }
+      processCSV(text);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // --- 資料同步寫入雲端功能 ---
+  const syncSingleChangeToSupabase = async (mId, fieldsToUpdate) => {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase
+        .from('bom_items')
+        .update(fieldsToUpdate)
+        .eq('material_code', mId);
+
+      if (error) throw error;
+    } catch (e) {
+      console.error(e);
+      showToast("雲端同步失敗: " + e.message, "error");
+    }
+  };
+
+  const handleDueDateChange = (pCode, sCode, mId, newDate) => {
+    const formattedDate = newDate ? newDate.replace(/-/g, '/') : '';
+    setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], dueDate: formattedDate } }));
+    syncSingleChangeToSupabase(mId, { due_date: formattedDate });
+  };
+
+  const handleMemoChange = (pCode, sCode, mId, newMemo) => {
+    setMaterials(prev => ({ ...prev, [mId]: { ...prev[mId], memo: newMemo } }));
+    syncSingleChangeToSupabase(mId, { memo: newMemo });
+  };
+
+  const cycleStatus = (materialId, project) => {
+    const projectColumns = {
+      'B1F整改': 'status_b1f',
+      'IWKA轉移': 'status_iwka',
+      '仿單格式化': 'status_format',
+      '處方藥電子仿單': 'status_qrcode',
+      'OTC變更': 'status_otc'
+    };
+
+    setMaterials(prev => {
+      const currentStatus = prev[materialId].projects[project] || 'pending';
+      const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
+      const nextStatus = STATUS_SEQUENCE[(currentIndex + 1) % STATUS_SEQUENCE.length];
+      
+      syncSingleChangeToSupabase(materialId, { [projectColumns[project]]: nextStatus });
+
+      return {
+        ...prev,
+        [materialId]: {
+          ...prev[materialId],
+          projects: {
+            ...prev[materialId].projects,
+            [project]: nextStatus
+          }
+        }
+      };
+    });
+  };
+
+  // 強化日期格式化，過濾掉任何非標準的字串，防範瀏覽器不相容警告
+  const formatDateForInput = (dateStr) => {
+    if (!dateStr || dateStr === '-') return '';
+    const clean = String(dateStr).trim().replace(/-/g, '/');
+    const parts = clean.split('/');
+    if (parts.length === 3) {
+      const y = parts[0];
+      const m = parts[1];
+      const d = parts[2];
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+    }
+    return '';
+  };
+
+  const uniqueMaterials = useMemo(() => Object.values(materials), [materials]);
+  
+  const sharedMaterialsMap = useMemo(() => {
+    const counts = {};
+    products.forEach(p => p.specs.forEach(s => s.materialIds.forEach(mId => {
+      counts[mId] = (counts[mId] || 0) + 1;
+    })));
+    return counts;
+  }, [products]);
+
+  const statuses = useMemo(() => {
+    const s = {};
+    Object.values(materials).forEach(mat => {
+      PROJECTS.forEach(proj => {
+        s[`${mat.id}_${proj}`] = mat.projects[proj] || 'pending';
+      });
+    });
+    return s;
+  }, [materials]);
+
+  const dashboardStats = useMemo(() => {
+    return PROJECTS.map(proj => {
+      const mats = uniqueMaterials;
+      const active = mats.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') !== 'na');
+      const done = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'released');
+      return { 
+        name: proj, total: active.length, done: done.length, 
+        percentage: active.length ? Math.round((done.length / active.length) * 100) : 0,
+        ...PROJECT_CONFIG[proj] 
+      };
+    });
+  }, [statuses, uniqueMaterials]);
+
+  const filteredData = useMemo(() => {
+    const hydratedData = products.map(product => ({
+      ...product,
+      specs: product.specs.map(spec => ({
+        ...spec,
+        materials: spec.materialIds.map(id => materials[id]).filter(Boolean)
+      }))
+    }));
+    
+    if (!searchTerm.trim()) return hydratedData;
+    const lowerTerm = searchTerm.toLowerCase();
+    
+    return hydratedData.map(product => {
+      const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
+      const filteredSpecs = product.specs.map(spec => {
+        const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
+        const filteredMaterials = spec.materials.filter(mat => 
+          mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
+        );
+        if (productMatch || specMatch || filteredMaterials.length > 0) {
+          return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
+        }
+        return null;
+      }).filter(Boolean);
+      
+      if (productMatch || filteredSpecs.length > 0) {
+        return { ...product, specs: filteredSpecs.length > 0 ? filteredSpecs : product.specs };
+      }
+      return null;
+    }).filter(Boolean);
+  }, [searchTerm, products, materials]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-8 font-sans pb-24 relative">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {toastMessage && (
+          <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all duration-300 ${toastMessage.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
+            {toastMessage.type === 'error' ? <AlertCircle className="w-5 h-5 mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2 text-emerald-400" />}
+            {toastMessage.message}
+          </div>
+        )}
+
+        {/* 雲端資料庫設定視窗 */}
+        {showSettings && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-4">
+              <h2 className="text-xl font-bold flex items-center text-slate-900">
+                <Database className="w-5 h-5 mr-2 text-indigo-600" /> Supabase 雲端設定
+              </h2>
+              <p className="text-sm text-slate-500">
+                請輸入您在 Supabase 的 Project API 憑證，將系統資料直接儲存在雲端。
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Project URL</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://xxxx.supabase.co"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={supabaseUrl} 
+                    onChange={(e) => setSupabaseUrl(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Anon API Key</label>
+                  <input 
+                    type="password" 
+                    placeholder="eyJhbGciOi..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={supabaseKey} 
+                    onChange={(e) => setSupabaseKey(e.target.value)} 
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button 
+                  onClick={clearConnectionSettings} 
+                  className="flex-1 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium transition-colors"
+                >
+                  清除連線
+                </button>
+                <button 
+                  onClick={saveConnectionSettings} 
+                  className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  連線儲存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center text-slate-900">
+              <Box className="mr-2 text-indigo-600 w-6 h-6 animate-pulse" />包材整改專案追蹤系統
+              {isDbConnected ? (
+                <span className="ml-3 text-xs font-bold bg-green-100 text-green-700 px-2.5 py-1 rounded-full border border-green-200 flex items-center">
+                  <Database className="w-3 h-3 mr-1" /> Supabase 雲端同步中
+                </span>
+              ) : (
+                <span className="ml-3 text-xs font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full border border-amber-200">
+                  離線體驗模式 (請連線資料庫)
+                </span>
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-1">目前資料庫共有 {uniqueMaterials.length} 筆包材料號</p>
+          </div>
+          <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
+            <div className="relative w-full md:w-64">
+              <input type="text" placeholder="搜尋代碼、名稱..." className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+              <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300">
+                <Database className="w-4 h-4 mr-1.5" /> 連線設定
+              </button>
+              <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
+                <Download className="w-4 h-4 mr-1.5" /> 下載範本
+              </button>
+              <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">
+                <Database className="w-4 h-4 mr-1.5" /> 匯出 CSV
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                <Upload className="w-4 h-4 mr-1.5" /> 匯入報表
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+            </div>
+          </div>
+        </header>
+
+        {isLoading && (
+          <div className="w-full bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-center justify-center text-indigo-700 text-sm font-semibold space-x-2 animate-pulse">
+            <Database className="w-4 h-4 animate-bounce" />
+            <span>資料庫同步更新中，請稍候...</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {dashboardStats.map(s => (
+            <div key={s.name} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <div className={`p-2 rounded-lg ${s.lightBg}`}>
+                    <s.icon className={`w-4 h-4 ${s.textColor}`} />
+                  </div>
+                  <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
+                </div>
+                <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
+              </div>
+              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
+                <div className={`h-2 ${s.color} transition-all duration-700 ease-out`} style={{ width: `${s.percentage}%` }}></div>
+              </div>
+              <div className="text-xs font-medium text-slate-500 flex justify-between">
+                <span>任務完成數</span>
+                <span className="text-slate-700">{s.done} <span className="text-slate-400 mx-0.5">/</span> {s.total}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          {filteredData.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
+              <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500">{searchTerm ? `找不到符合「${searchTerm}」的資料` : "目前沒有任何資料，請連接資料庫並匯入 BOM 表"}</p>
+            </div>
+          ) : (
+            filteredData.map(prod => (
+              <div key={prod.code} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <button onClick={() => setExpandedProducts(prev => prev.includes(prod.code) ? prev.filter(c => c !== prod.code) : [...prev, prod.code])} className="w-full px-6 py-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
+                  <div className="flex items-center space-x-3">
+                    {expandedProducts.includes(prod.code) ? <ChevronDown className="w-5 h-5 text-slate-400" /> : <ChevronRight className="w-5 h-5 text-slate-400" />}
+                    <span className="font-mono bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-sm font-semibold">{prod.code}</span>
+                    <span className="text-lg font-bold text-slate-800">{prod.name}</span>
+                  </div>
+                  <div className="text-sm text-slate-500">共 {prod.specs.length} 個規格</div>
+                </button>
+                {expandedProducts.includes(prod.code) && (
+                  <div className="bg-slate-50/50 p-4 space-y-4">
+                    {prod.specs.map(spec => (
+                      <div key={spec.code} className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                        <button onClick={() => setExpandedSpecs(prev => prev.includes(spec.code) ? prev.filter(c => c !== spec.code) : [...prev, spec.code])} className="w-full px-4 py-3 flex items-center space-x-3 bg-white hover:bg-slate-50 transition-colors border-b border-slate-100">
+                          {expandedSpecs.includes(spec.code) ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+                          <span className="font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-sm font-semibold">{spec.code}</span>
+                          <span className="font-medium text-slate-700">{spec.name}</span>
+                        </button>
+                        {expandedSpecs.includes(spec.code) && (
+                          <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full text-sm text-left whitespace-nowrap">
+                              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                                <tr>
+                                  <th className="px-4 py-3 font-semibold min-w-[140px] sticky left-0 bg-slate-50 z-10 border-r border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">標示材料</th>
+                                  <th className="px-4 py-3 font-semibold min-w-[120px]">料號</th>
+                                  <th className="px-4 py-3 font-semibold min-w-[110px]"><Calendar className="w-4 h-4 inline mr-1 text-slate-400"/>預計完成日</th>
+                                  {PROJECTS.map(proj => <th key={proj} className="px-4 py-3 font-semibold text-center min-w-[120px]">{proj}</th>)}
+                                  <th className="px-4 py-3 font-semibold min-w-[100px] text-center"><LinkIcon className="w-4 h-4 inline mr-1 text-slate-400"/>共用物料</th>
+                                  <th className="px-4 py-3 font-semibold min-w-[150px]"><MessageSquare className="w-4 h-4 inline mr-1 text-slate-400"/>備註</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {spec.materials.map((mat, idx) => {
+                                  const isShared = sharedMaterialsMap[mat.id] > 1;
+                                  return (
+                                    <tr key={mat.id} className={`hover:bg-slate-50/80 transition-colors ${idx !== spec.materials.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                                      <td className="px-4 py-3 font-medium text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">{mat.name}</td>
+                                      <td className="px-4 py-3 font-mono text-slate-500">{mat.id}</td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium text-xs">
+                                        <input
+                                          type="date"
+                                          value={formatDateForInput(mat.dueDate)}
+                                          onChange={(e) => handleDueDateChange(prod.code, spec.code, mat.id, e.target.value)}
+                                          className="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white hover:bg-slate-50 transition-colors w-28 cursor-pointer text-slate-700"
+                                        />
+                                      </td>
+                                      {PROJECTS.map(proj => {
+                                        const status = statuses[`${mat.id}_${proj}`] || 'pending';
+                                        const statusInfo = STATUS_CONFIG[status];
+                                        return (
+                                          <td key={proj} className="px-4 py-3 text-center">
+                                            <button
+                                              onClick={() => cycleStatus(mat.id, proj)}
+                                              className={`inline-flex items-center justify-center w-full px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${statusInfo.color}`}
+                                            >
+                                              {statusInfo.icon}
+                                              {statusInfo.label}
+                                            </button>
+                                          </td>
+                                        );
+                                      })}
+                                      <td className="px-4 py-3 text-center">
+                                        {isShared ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">Y</span> : <span className="text-slate-300 text-xs font-medium">N</span>}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-500 text-xs">
+                                        <input
+                                          type="text"
+                                          value={mat.memo || ''}
+                                          onChange={(e) => handleMemoChange(prod.code, spec.code, mat.id, e.target.value)}
+                                          placeholder="點擊新增備註..."
+                                          className="border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-transparent hover:bg-white focus:bg-white transition-all w-full min-w-[150px] max-w-[250px] text-slate-700"
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
