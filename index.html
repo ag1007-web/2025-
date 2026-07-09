@@ -79,26 +79,28 @@
       const [products, setProducts] = useState(INITIAL_PRODUCTS);
       const [materials, setMaterials] = useState(INITIAL_MATERIALS);
       const [searchTerm, setSearchTerm] = useState('');
+      
+      // 新增：專案篩選狀態
+      const [activeProjectFilter, setActiveProjectFilter] = useState(null);
+
       const [expandedProducts, setExpandedProducts] = useState([]); 
       const [expandedSpecs, setExpandedSpecs] = useState([]); 
       const [toastMessage, setToastMessage] = useState(null);
       const [isLoading, setIsLoading] = useState(false);
       const [isSdkLoaded, setIsSdkLoaded] = useState(false);
       
-      // 權限控制狀態 (防呆鎖定機制)
-      const [isEditMode, setIsEditMode] = useState(false);
-      const [showUnlockModal, setShowUnlockModal] = useState(false);
-      const [unlockPin, setUnlockPin] = useState('');
-      
-      // Supabase 連線憑證狀態
-      const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL);
-      const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY);
+      const [supabaseUrl, setSupabaseUrl] = useState(() => {
+        return localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
+      });
+      const [supabaseKey, setSupabaseKey] = useState(() => {
+        return localStorage.getItem('supabase_key') || DEFAULT_SUPABASE_ANON_KEY;
+      });
       const [showSettings, setShowSettings] = useState(false);
       const [isDbConnected, setIsDbConnected] = useState(false);
       
       const fileInputRef = useRef(null);
 
-      // 動態驗證 Supabase CDN 是否順利載入
+      // 動態驗證 Supabase CDN
       useEffect(() => {
         if (window.supabase) {
           setIsSdkLoaded(true);
@@ -129,21 +131,7 @@
         setTimeout(() => setToastMessage(null), 3000);
       };
 
-      // 處理解鎖編輯模式
-      const handleUnlock = (e) => {
-        e.preventDefault();
-        // 設定防呆解鎖密碼為 admin
-        if (unlockPin === 'admin') {
-          setIsEditMode(true);
-          setShowUnlockModal(false);
-          setUnlockPin('');
-          showToast("已進入編輯模式，可以修改物料狀態");
-        } else {
-          showToast("密碼錯誤，無法解鎖", "error");
-        }
-      };
-
-      // 從 Supabase 讀取並重構資料庫內容
+      // 從 Supabase 讀取資料
       const fetchSupabaseData = async () => {
         if (!supabase) {
           setIsDbConnected(false);
@@ -215,9 +203,7 @@
       };
 
       useEffect(() => {
-        if (supabase) {
-          fetchSupabaseData();
-        }
+        if (supabase) fetchSupabaseData();
       }, [supabase]);
 
       const saveConnectionSettings = () => {
@@ -346,17 +332,19 @@
         const newMaterials = { ...materials };
         const dbUpsertRows = [];
 
-        let lastPCode = ''; let lastPName = '';
-        let lastSCode = ''; let lastSName = '';
+        let lastPCode = ''; let lastPName = ''; let lastSCode = ''; let lastSName = '';
 
         dataLines.forEach(line => {
           const row = line.split(delimiter).map(item => item.replace(/^["']|["']$/g, '').trim());
           while (row.length < 13) row.push('');
           
           let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
+          
           if (!mCode) return; 
 
-          if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) sCode = String(Number(sCode));
+          if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
+            sCode = String(Number(sCode));
+          }
           if (sCode) {
             sCode = String(sCode).trim();
             if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) sCode = sCode.padStart(5, '0');
@@ -368,12 +356,16 @@
             if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
             if (!pName && pCode === lastPCode) pName = lastPName;
             lastPCode = pCode; lastPName = pName || '';
-          } else { pCode = lastPCode; pName = lastPName; }
+          } else {
+            pCode = lastPCode; pName = lastPName;
+          }
 
           if (sCode) {
             if (!sName && sCode === lastSCode) sName = lastSName;
             lastSCode = sCode; lastSName = sName || '';
-          } else { sCode = lastSCode; sName = lastSName; }
+          } else {
+            sCode = lastSCode; sName = lastSName;
+          }
 
           if (!pCode) pCode = "未分類產品";
           if (!sCode) sCode = "未分類規格";
@@ -415,10 +407,8 @@
 
           dbUpsertRows.push({
             composite_key: `${pCode}_${sCode}_${mCode}`,
-            product_code_3: pCode, product_name: pName,
-            spec_code_5: sCode, spec_name: sName,
-            material_name: mName, material_code: mCode,
-            due_date: newMaterials[mCode].dueDate || '',
+            product_code_3: pCode, product_name: pName, spec_code_5: sCode, spec_name: sName,
+            material_name: mName, material_code: mCode, due_date: newMaterials[mCode].dueDate || '',
             status_b1f: newMaterials[mCode].projects['B1F整改'] || 'na',
             status_iwka: newMaterials[mCode].projects['IWKA轉移'] || 'na',
             status_format: newMaterials[mCode].projects['仿單格式化'] || 'na',
@@ -437,20 +427,20 @@
         setMaterials(newMaterials);
         setExpandedProducts([]);
         setExpandedSpecs([]);
+        setActiveProjectFilter(null);
 
         if (supabase) {
           setIsLoading(true);
           try {
             const keysToDelete = dbUpsertRows.map(r => r.composite_key);
             if (keysToDelete.length > 0) {
-              const { error: delError } = await supabase.from('bom_items').delete().in('composite_key', keysToDelete);
-              if (delError) throw delError;
+              await supabase.from('bom_items').delete().in('composite_key', keysToDelete);
             }
-            const { error: insError } = await supabase.from('bom_items').insert(dbUpsertRows);
-            if (insError) throw insError;
+            const { error } = await supabase.from('bom_items').insert(dbUpsertRows);
+            if (error) throw error;
             showToast("資料匯入成功，已同步至 Supabase 雲端！");
           } catch (e) {
-            console.error(e);
+            console.error("雲端寫入發生異常：", e);
             showToast("本地匯入成功，但同步雲端失敗: " + e.message, "error");
           } finally {
             setIsLoading(false);
@@ -504,10 +494,12 @@
       };
 
       const cycleStatus = (materialId, project) => {
-        if (!isEditMode) return; // 雙重防呆
         const projectColumns = {
-          'B1F整改': 'status_b1f', 'IWKA轉移': 'status_iwka', '仿單格式化': 'status_format',
-          '處方藥電子仿單': 'status_qrcode', 'OTC變更': 'status_otc'
+          'B1F整改': 'status_b1f',
+          'IWKA轉移': 'status_iwka',
+          '仿單格式化': 'status_format',
+          '處方藥電子仿單': 'status_qrcode',
+          'OTC變更': 'status_otc'
         };
 
         setMaterials(prev => {
@@ -521,10 +513,49 @@
             ...prev,
             [materialId]: {
               ...prev[materialId],
-              projects: { ...prev[materialId].projects, [project]: nextStatus }
+              projects: {
+                ...prev[materialId].projects,
+                [project]: nextStatus
+              }
             }
           };
         });
+      };
+
+      // 專案卡片點擊：過濾並自動展開未發檔的物料
+      const handleProjectFilterClick = (projectName) => {
+        if (activeProjectFilter === projectName) {
+          setActiveProjectFilter(null);
+          setExpandedProducts([]);
+          setExpandedSpecs([]);
+        } else {
+          setActiveProjectFilter(projectName);
+          
+          const productsToExpand = [];
+          const specsToExpand = [];
+
+          products.forEach(p => {
+            let pHasMatch = false;
+            p.specs.forEach(s => {
+              let sHasMatch = false;
+              s.materialIds.forEach(mId => {
+                const mat = materials[mId];
+                if (mat) {
+                  const status = mat.projects[projectName];
+                  if (status && status !== 'na' && status !== 'released') {
+                    sHasMatch = true;
+                    pHasMatch = true;
+                  }
+                }
+              });
+              if (sHasMatch) specsToExpand.push(s.code);
+            });
+            if (pHasMatch) productsToExpand.push(p.code);
+          });
+
+          setExpandedProducts(productsToExpand);
+          setExpandedSpecs(specsToExpand);
+        }
       };
 
       const formatDateForInput = (dateStr) => {
@@ -533,7 +564,9 @@
         const parts = clean.split('/');
         if (parts.length === 3) {
           const y = parts[0]; const m = parts[1]; const d = parts[2];
-          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+          }
         }
         return '';
       };
@@ -551,7 +584,9 @@
       const statuses = useMemo(() => {
         const s = {};
         Object.values(materials).forEach(mat => {
-          PROJECTS.forEach(proj => { s[`${mat.id}_${proj}`] = mat.projects[proj] || 'pending'; });
+          PROJECTS.forEach(proj => {
+            s[`${mat.id}_${proj}`] = mat.projects[proj] || 'pending';
+          });
         });
         return s;
       }, [materials]);
@@ -570,7 +605,7 @@
       }, [statuses, uniqueMaterials]);
 
       const filteredData = useMemo(() => {
-        const hydratedData = products.map(product => ({
+        let hydratedData = products.map(product => ({
           ...product,
           specs: product.specs.map(spec => ({
             ...spec,
@@ -578,28 +613,45 @@
           }))
         }));
         
-        if (!searchTerm.trim()) return hydratedData;
-        const lowerTerm = searchTerm.toLowerCase();
-        
-        return hydratedData.map(product => {
-          const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
-          const filteredSpecs = product.specs.map(spec => {
-            const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
-            const filteredMaterials = spec.materials.filter(mat => 
-              mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
-            );
-            if (productMatch || specMatch || filteredMaterials.length > 0) {
-              return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
+        // 1. 專案狀態篩選 (若有啟動，只顯示該專案「非無須執行」且「非已發檔」的物料)
+        if (activeProjectFilter) {
+          hydratedData = hydratedData.map(product => {
+            const filteredSpecs = product.specs.map(spec => {
+              const filteredMaterials = spec.materials.filter(mat => {
+                const status = mat.projects[activeProjectFilter];
+                return status && status !== 'na' && status !== 'released';
+              });
+              return { ...spec, materials: filteredMaterials };
+            }).filter(spec => spec.materials.length > 0);
+            return { ...product, specs: filteredSpecs };
+          }).filter(product => product.specs.length > 0);
+        }
+
+        // 2. 關鍵字搜尋篩選
+        if (searchTerm.trim()) {
+          const lowerTerm = searchTerm.toLowerCase();
+          hydratedData = hydratedData.map(product => {
+            const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
+            const filteredSpecs = product.specs.map(spec => {
+              const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
+              const filteredMaterials = spec.materials.filter(mat => 
+                mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
+              );
+              if (productMatch || specMatch || filteredMaterials.length > 0) {
+                return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
+              }
+              return null;
+            }).filter(Boolean);
+            
+            if (productMatch || filteredSpecs.length > 0) {
+              return { ...product, specs: filteredSpecs.length > 0 ? filteredSpecs : product.specs };
             }
             return null;
           }).filter(Boolean);
-          
-          if (productMatch || filteredSpecs.length > 0) {
-            return { ...product, specs: filteredSpecs.length > 0 ? filteredSpecs : product.specs };
-          }
-          return null;
-        }).filter(Boolean);
-      }, [searchTerm, products, materials]);
+        }
+
+        return hydratedData;
+      }, [searchTerm, products, materials, activeProjectFilter]);
 
       return (
         <div className="min-h-screen bg-slate-50 p-8 font-sans pb-24 relative">
@@ -609,45 +661,6 @@
               <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all duration-300 ${toastMessage.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
                 {toastMessage.type === 'error' ? <i className="fa-solid fa-circle-exclamation mr-2"></i> : <i className="fa-solid fa-circle-check mr-2 text-emerald-400"></i>}
                 {toastMessage.message}
-              </div>
-            )}
-
-            {/* 解鎖密碼視窗 */}
-            {showUnlockModal && (
-              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-sm w-full space-y-4">
-                  <h2 className="text-xl font-bold flex items-center text-slate-900">
-                    <i className="fa-solid fa-unlock-keyhole mr-2 text-amber-500"></i> 解鎖編輯模式
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    為了避免非改版人員誤觸，請輸入專案編輯密碼以開啟編輯權限。(防呆預設：admin)
-                  </p>
-                  <form onSubmit={handleUnlock} className="space-y-3">
-                    <input 
-                      type="password" 
-                      placeholder="請輸入密碼..."
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      value={unlockPin} 
-                      onChange={(e) => setUnlockPin(e.target.value)} 
-                      autoFocus
-                    />
-                    <div className="flex gap-2 pt-2">
-                      <button 
-                        type="button"
-                        onClick={() => { setShowUnlockModal(false); setUnlockPin(''); }} 
-                        className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium transition-colors"
-                      >
-                        取消
-                      </button>
-                      <button 
-                        type="submit"
-                        className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
-                      >
-                        確認解鎖
-                      </button>
-                    </div>
-                  </form>
-                </div>
               </div>
             )}
 
@@ -718,40 +731,33 @@
                 <p className="text-sm text-slate-400 mt-1">目前資料庫共有 {uniqueMaterials.length} 筆包材料號</p>
               </div>
               <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
-                <div className="relative w-full md:w-56">
+                {activeProjectFilter && (
+                  <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm">
+                    <i className="fa-solid fa-filter mr-1.5"></i>
+                    篩選: {activeProjectFilter} (未發檔)
+                    <button onClick={(e) => { e.stopPropagation(); setActiveProjectFilter(null); setExpandedProducts([]); setExpandedSpecs([]); }} className="ml-2 hover:text-indigo-900 focus:outline-none">
+                      <i className="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                  </span>
+                )}
+                <div className="relative w-full md:w-64">
                   <input type="text" placeholder="搜尋代碼、名稱..." className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
                 </div>
-                
-                <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                  {/* 切換檢視 / 編輯模式 */}
-                  <button 
-                    onClick={() => isEditMode ? setIsEditMode(false) : setShowUnlockModal(true)} 
-                    className={`flex items-center px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${isEditMode ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`}
-                  >
-                    <i className={`fa-solid ${isEditMode ? 'fa-lock-open' : 'fa-lock'} mr-1.5`}></i> 
-                    {isEditMode ? '編輯模式' : '檢視模式'}
+                <div className="flex gap-2 w-full md:w-auto">
+                  <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300">
+                    <i className="fa-solid fa-database mr-1.5"></i> 連線設定
                   </button>
-
-                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">
-                    <i className="fa-solid fa-file-excel mr-1.5"></i> 匯出報表
+                  <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
+                    <i className="fa-solid fa-download mr-1.5"></i> 下載範本
                   </button>
-
-                  {/* 只有編輯模式才顯示進階管理功能 */}
-                  {isEditMode && (
-                    <>
-                      <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
-                        <i className="fa-solid fa-download mr-1.5"></i> 下載範本
-                      </button>
-                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
-                        <i className="fa-solid fa-upload mr-1.5"></i> 匯入 BOM
-                      </button>
-                      <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors">
-                        <i className="fa-solid fa-database mr-1.5"></i> 連線設定
-                      </button>
-                      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                    </>
-                  )}
+                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">
+                    <i className="fa-solid fa-database mr-1.5"></i> 匯出 CSV
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                    <i className="fa-solid fa-upload mr-1.5"></i> 匯入報表
+                  </button>
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                 </div>
               </div>
             </header>
@@ -765,7 +771,11 @@
 
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {dashboardStats.map(s => (
-                <div key={s.name} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <div 
+                  key={s.name} 
+                  onClick={() => handleProjectFilterClick(s.name)}
+                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all cursor-pointer hover:shadow-md ${activeProjectFilter === s.name ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-indigo-300'}`}
+                >
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
                       <div className={`p-2 rounded-lg ${s.lightBg}`}>
@@ -790,7 +800,9 @@
               {filteredData.length === 0 ? (
                 <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
                   <i className="fa-solid fa-file-lines text-5xl text-slate-300 mx-auto mb-3 block"></i>
-                  <p className="text-slate-500">{searchTerm ? `找不到符合「${searchTerm}」的資料` : "目前沒有任何資料，請切換至編輯模式並匯入 BOM 表"}</p>
+                  <p className="text-slate-500">
+                    {searchTerm || activeProjectFilter ? '找不到符合篩選條件的資料' : '目前沒有任何資料，請連接資料庫並匯入 BOM 表'}
+                  </p>
                 </div>
               ) : (
                 filteredData.map(prod => (
@@ -832,22 +844,14 @@
                                         <tr key={mat.id} className={`hover:bg-slate-50/80 transition-colors ${idx !== spec.materials.length - 1 ? 'border-b border-slate-100' : ''}`}>
                                           <td className="px-4 py-3 font-medium text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">{mat.name}</td>
                                           <td className="px-4 py-3 font-mono text-slate-500">{mat.id}</td>
-                                          
-                                          {/* 日期欄位：依權限切換元件 */}
                                           <td className="px-4 py-3 text-slate-600 font-medium text-xs">
-                                            {isEditMode ? (
-                                              <input
-                                                type="date"
-                                                value={formatDateForInput(mat.dueDate)}
-                                                onChange={(e) => handleDueDateChange(prod.code, spec.code, mat.id, e.target.value)}
-                                                className="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white hover:bg-slate-50 transition-colors w-28 cursor-pointer text-slate-700"
-                                              />
-                                            ) : (
-                                              <span>{mat.dueDate || '-'}</span>
-                                            )}
+                                            <input
+                                              type="date"
+                                              value={formatDateForInput(mat.dueDate)}
+                                              onChange={(e) => handleDueDateChange(prod.code, spec.code, mat.id, e.target.value)}
+                                              className="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white hover:bg-slate-50 transition-colors w-28 cursor-pointer text-slate-700"
+                                            />
                                           </td>
-                                          
-                                          {/* 狀態按鈕：依權限停用 */}
                                           {PROJECTS.map(proj => {
                                             const status = statuses[`${mat.id}_${proj}`] || 'pending';
                                             const statusInfo = STATUS_CONFIG[status];
@@ -855,9 +859,7 @@
                                               <td key={proj} className="px-4 py-3 text-center">
                                                 <button
                                                   onClick={() => cycleStatus(mat.id, proj)}
-                                                  disabled={!isEditMode}
-                                                  style={{ pointerEvents: isEditMode ? 'auto' : 'none' }}
-                                                  className={`inline-flex items-center justify-center w-full px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${statusInfo.color} ${!isEditMode && 'opacity-90'}`}
+                                                  className={`inline-flex items-center justify-center w-full px-2 py-1.5 rounded-md text-xs font-medium border transition-colors ${statusInfo.color}`}
                                                 >
                                                   {statusInfo.icon && <i className={`${statusInfo.icon} mr-1.5`}></i>}
                                                   {statusInfo.label}
@@ -865,26 +867,17 @@
                                               </td>
                                             );
                                           })}
-
                                           <td className="px-4 py-3 text-center">
                                             {isShared ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">Y</span> : <span className="text-slate-300 text-xs font-medium">N</span>}
                                           </td>
-                                          
-                                          {/* 備註欄位：依權限切換元件 */}
                                           <td className="px-4 py-3 text-slate-500 text-xs">
-                                            {isEditMode ? (
-                                              <input
-                                                type="text"
-                                                value={mat.memo || ''}
-                                                onChange={(e) => handleMemoChange(prod.code, spec.code, mat.id, e.target.value)}
-                                                placeholder="點擊新增備註..."
-                                                className="border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-transparent hover:bg-white focus:bg-white transition-all w-full min-w-[150px] max-w-[250px] text-slate-700"
-                                              />
-                                            ) : (
-                                              <span className="block min-w-[150px] max-w-[250px] truncate" title={mat.memo}>
-                                                {mat.memo || '-'}
-                                              </span>
-                                            )}
+                                            <input
+                                              type="text"
+                                              value={mat.memo || ''}
+                                              onChange={(e) => handleMemoChange(prod.code, spec.code, mat.id, e.target.value)}
+                                              placeholder="點擊新增備註..."
+                                              className="border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-transparent hover:bg-white focus:bg-white transition-all w-full min-w-[150px] max-w-[250px] text-slate-700"
+                                            />
                                           </td>
                                         </tr>
                                       );
