@@ -55,7 +55,7 @@
     const STATUS_SEQUENCE = ['na', 'pending', 'revising', 'signing', 'released'];
 
     // ==========================================
-    // ⚠️ 請在這裡貼上您的 Supabase 連線資訊 ⚠️
+    // 預設您的 Supabase 連線資訊 (使用者打開即用)
     // ==========================================
     const DEFAULT_SUPABASE_URL = "https://bocqaxslcbjuvgwqloyr.supabase.co"; 
     const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_svCuLcspHMXE2hNBXG_v7w_IQsROQ7W";
@@ -589,13 +589,20 @@
         return s;
       }, [materials]);
 
+      // 更新儀表板統計邏輯，加入 待改版、改版中、會簽中 的件數
       const dashboardStats = useMemo(() => {
         return PROJECTS.map(proj => {
           const mats = uniqueMaterials;
           const active = mats.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') !== 'na');
+          
           const done = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'released');
+          const pendingCount = active.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') === 'pending').length;
+          const revisingCount = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'revising').length;
+          const signingCount = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'signing').length;
+
           return { 
             name: proj, total: active.length, done: done.length, 
+            pending: pendingCount, revising: revisingCount, signing: signingCount,
             percentage: active.length ? Math.round((done.length / active.length) * 100) : 0,
             ...PROJECT_CONFIG[proj] 
           };
@@ -801,23 +808,41 @@
                 <div 
                   key={s.name} 
                   onClick={() => handleProjectFilterClick(s.name)}
-                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all cursor-pointer hover:shadow-md ${activeProjectFilter === s.name ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-indigo-300'}`}
+                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all cursor-pointer hover:shadow-md flex flex-col justify-between ${activeProjectFilter === s.name ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-indigo-300'}`}
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-2">
-                      <div className={`p-2 rounded-lg ${s.lightBg}`}>
-                        <i className={`${s.icon} ${s.textColor}`}></i>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-2">
+                        <div className={`p-2 rounded-lg ${s.lightBg}`}>
+                          <i className={`${s.icon} ${s.textColor}`}></i>
+                        </div>
+                        <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
                       </div>
-                      <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
+                      <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
                     </div>
-                    <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
+                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
+                      <div className={`h-2 ${s.color} transition-all duration-700 ease-out`} style={{ width: `${s.percentage}%` }}></div>
+                    </div>
+                    <div className="text-xs font-medium text-slate-500 flex justify-between">
+                      <span>任務完成數</span>
+                      <span className="text-slate-700">{s.done} <span className="text-slate-400 mx-0.5">/</span> {s.total}</span>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
-                    <div className={`h-2 ${s.color} transition-all duration-700 ease-out`} style={{ width: `${s.percentage}%` }}></div>
-                  </div>
-                  <div className="text-xs font-medium text-slate-500 flex justify-between">
-                    <span>任務完成數</span>
-                    <span className="text-slate-700">{s.done} <span className="text-slate-400 mx-0.5">/</span> {s.total}</span>
+
+                  {/* 新增的追蹤狀態計數區塊 */}
+                  <div className="mt-4 grid grid-cols-3 gap-1 border-t border-slate-100 pt-3">
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-yellow-50/50 hover:bg-yellow-50 transition-colors">
+                      <span className="text-[10px] text-yellow-600 mb-0.5">待改版</span>
+                      <span className="text-xs font-bold text-yellow-700">{s.pending}</span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-blue-50/50 hover:bg-blue-50 transition-colors">
+                      <span className="text-[10px] text-blue-600 mb-0.5">改版中</span>
+                      <span className="text-xs font-bold text-blue-700">{s.revising}</span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-indigo-50/50 hover:bg-indigo-50 transition-colors">
+                      <span className="text-[10px] text-indigo-600 mb-0.5">會簽中</span>
+                      <span className="text-xs font-bold text-indigo-700">{s.signing}</span>
+                    </div>
                   </div>
                 </div>
               ))}
