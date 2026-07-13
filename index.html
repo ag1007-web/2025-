@@ -109,7 +109,6 @@
 
       // 實例化 Supabase Client
       const supabase = useMemo(() => {
-        // 如果使用者有設定，或是我們有硬編碼的預設值，就會自動嘗試連線
         const urlToUse = supabaseUrl || DEFAULT_SUPABASE_URL;
         const keyToUse = supabaseKey || DEFAULT_SUPABASE_ANON_KEY;
         
@@ -539,10 +538,21 @@
               s.materialIds.forEach(mId => {
                 const mat = materials[mId];
                 if (mat) {
-                  const status = mat.projects[projectName];
-                  if (status && status !== 'na' && status !== 'released') {
-                    sHasMatch = true;
-                    pHasMatch = true;
+                  // 特別處理「合併改版」的邏輯
+                  if (projectName === '合併改版 (多專案)') {
+                    const activeProjs = PROJECTS.filter(proj => mat.projects[proj] && mat.projects[proj] !== 'na');
+                    const isAllReleased = activeProjs.every(proj => mat.projects[proj] === 'released');
+                    if (activeProjs.length >= 2 && !isAllReleased) {
+                      sHasMatch = true;
+                      pHasMatch = true;
+                    }
+                  } else {
+                    // 一般單一專案邏輯
+                    const status = mat.projects[projectName];
+                    if (status && status !== 'na' && status !== 'released') {
+                      sHasMatch = true;
+                      pHasMatch = true;
+                    }
                   }
                 }
               });
@@ -589,7 +599,7 @@
         return s;
       }, [materials]);
 
-      // 更新儀表板統計邏輯，加入 待改版、改版中、會簽中 的件數
+      // 一般單一專案的統計
       const dashboardStats = useMemo(() => {
         return PROJECTS.map(proj => {
           const mats = uniqueMaterials;
@@ -609,6 +619,44 @@
         });
       }, [statuses, uniqueMaterials]);
 
+      // 新增：計算合併改版的統計卡片
+      const combinedStats = useMemo(() => {
+        const mats = uniqueMaterials.filter(m => {
+          const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
+          return activeProjs.length >= 2;
+        });
+        const total = mats.length;
+        const done = mats.filter(m => PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na').every(p => m.projects[p] === 'released')).length;
+        
+        let pendingCount = 0;
+        let revisingCount = 0;
+        let signingCount = 0;
+        
+        mats.forEach(m => {
+          const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
+          const isDone = activeProjs.every(p => m.projects[p] === 'released');
+          if (!isDone) {
+            // 以目前最急迫/最前面的狀態做為計數標準，避免同一物料被重複計數
+            if (activeProjs.some(p => m.projects[p] === 'signing')) signingCount++;
+            else if (activeProjs.some(p => m.projects[p] === 'revising')) revisingCount++;
+            else pendingCount++;
+          }
+        });
+
+        return {
+          name: '合併改版 (多專案)',
+          total, done, pending: pendingCount, revising: revisingCount, signing: signingCount,
+          percentage: total ? Math.round((done / total) * 100) : 0,
+          color: 'bg-fuchsia-500',
+          textColor: 'text-fuchsia-600',
+          lightBg: 'bg-fuchsia-50',
+          icon: 'fa-solid fa-layer-group'
+        };
+      }, [uniqueMaterials]);
+
+      // 將 5個專案 與 合併專案 統整為一個卡片陣列
+      const allDashboardCards = [...dashboardStats, combinedStats];
+
       const filteredData = useMemo(() => {
         let hydratedData = products.map(product => ({
           ...product,
@@ -622,8 +670,14 @@
           hydratedData = hydratedData.map(product => {
             const filteredSpecs = product.specs.map(spec => {
               const filteredMaterials = spec.materials.filter(mat => {
-                const status = mat.projects[activeProjectFilter];
-                return status && status !== 'na' && status !== 'released';
+                if (activeProjectFilter === '合併改版 (多專案)') {
+                  const activeProjs = PROJECTS.filter(p => mat.projects[p] && mat.projects[p] !== 'na');
+                  const isAllReleased = activeProjs.every(p => mat.projects[p] === 'released');
+                  return activeProjs.length >= 2 && !isAllReleased;
+                } else {
+                  const status = mat.projects[activeProjectFilter];
+                  return status && status !== 'na' && status !== 'released';
+                }
               });
               return { ...spec, materials: filteredMaterials };
             }).filter(spec => spec.materials.length > 0);
@@ -760,9 +814,9 @@
                 )}
 
                 {activeProjectFilter && (
-                  <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm">
+                  <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm whitespace-nowrap">
                     <i className="fa-solid fa-filter mr-1.5"></i>
-                    篩選: {activeProjectFilter} (未發檔)
+                    篩選: {activeProjectFilter}
                     <button onClick={(e) => { e.stopPropagation(); setActiveProjectFilter(null); setExpandedProducts([]); setExpandedSpecs([]); }} className="ml-2 hover:text-indigo-900 focus:outline-none">
                       <i className="fa-solid fa-xmark text-lg"></i>
                     </button>
@@ -782,14 +836,14 @@
                       <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
                         <i className="fa-solid fa-download mr-1.5"></i> 下載範本
                       </button>
-                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 whitespace-nowrap">
                         <i className="fa-solid fa-upload mr-1.5"></i> 匯入報表
                       </button>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                     </>
                   )}
                   {/* 所有人都可使用的匯出按鈕 */}
-                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">
+                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 whitespace-nowrap">
                     <i className="fa-solid fa-database mr-1.5"></i> 匯出 CSV
                   </button>
                 </div>
@@ -803,12 +857,13 @@
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {dashboardStats.map(s => (
+            {/* 新的儀表板配置：改為 6 個卡片平分或自適應排版 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              {allDashboardCards.map(s => (
                 <div 
                   key={s.name} 
                   onClick={() => handleProjectFilterClick(s.name)}
-                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all cursor-pointer hover:shadow-md flex flex-col justify-between ${activeProjectFilter === s.name ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-indigo-300'}`}
+                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all cursor-pointer hover:shadow-md flex flex-col justify-between ${activeProjectFilter === s.name ? 'border-indigo-500 ring-2 ring-indigo-100 transform -translate-y-1' : 'border-slate-200 hover:border-indigo-300 hover:-translate-y-0.5'}`}
                 >
                   <div>
                     <div className="flex items-center justify-between mb-3">
@@ -816,7 +871,7 @@
                         <div className={`p-2 rounded-lg ${s.lightBg}`}>
                           <i className={`${s.icon} ${s.textColor}`}></i>
                         </div>
-                        <h3 className="font-bold text-slate-700 text-sm">{s.name}</h3>
+                        <h3 className="font-bold text-slate-700 text-sm tracking-tight">{s.name}</h3>
                       </div>
                       <span className="text-xl font-black text-slate-800">{s.percentage}%</span>
                     </div>
@@ -829,17 +884,17 @@
                     </div>
                   </div>
 
-                  {/* 新增的追蹤狀態計數區塊 */}
+                  {/* 進度狀態計數區塊 */}
                   <div className="mt-4 grid grid-cols-3 gap-1 border-t border-slate-100 pt-3">
-                    <div className="flex flex-col items-center justify-center p-1 rounded bg-yellow-50/50 hover:bg-yellow-50 transition-colors">
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-yellow-50/50 hover:bg-yellow-50 transition-colors" title="待改版">
                       <span className="text-[10px] text-yellow-600 mb-0.5">待改版</span>
                       <span className="text-xs font-bold text-yellow-700">{s.pending}</span>
                     </div>
-                    <div className="flex flex-col items-center justify-center p-1 rounded bg-blue-50/50 hover:bg-blue-50 transition-colors">
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-blue-50/50 hover:bg-blue-50 transition-colors" title="改版中">
                       <span className="text-[10px] text-blue-600 mb-0.5">改版中</span>
                       <span className="text-xs font-bold text-blue-700">{s.revising}</span>
                     </div>
-                    <div className="flex flex-col items-center justify-center p-1 rounded bg-indigo-50/50 hover:bg-indigo-50 transition-colors">
+                    <div className="flex flex-col items-center justify-center p-1 rounded bg-indigo-50/50 hover:bg-indigo-50 transition-colors" title="會簽中">
                       <span className="text-[10px] text-indigo-600 mb-0.5">會簽中</span>
                       <span className="text-xs font-bold text-indigo-700">{s.signing}</span>
                     </div>
@@ -965,3 +1020,5 @@
   </script>
 </body>
 </html>
+
+
