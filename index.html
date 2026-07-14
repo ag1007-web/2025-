@@ -69,6 +69,15 @@
       const [materials, setMaterials] = useState(INITIAL_MATERIALS);
       const [searchTerm, setSearchTerm] = useState('');
       
+      // 最近三筆更改紀錄
+      const [recentLogs, setRecentLogs] = useState(() => {
+        try {
+          return JSON.parse(localStorage.getItem('bom_recent_logs')) || [];
+        } catch {
+          return [];
+        }
+      });
+
       // 專案篩選狀態
       const [activeProjectFilter, setActiveProjectFilter] = useState(null);
 
@@ -492,6 +501,7 @@
 
       const cycleStatus = (materialId, project) => {
         if (!isEditMode) return;
+        
         const projectColumns = {
           'B1F整改': 'status_b1f',
           'IWKA轉移': 'status_iwka',
@@ -504,8 +514,26 @@
           const currentStatus = prev[materialId].projects[project] || 'pending';
           const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
           const nextStatus = STATUS_SEQUENCE[(currentIndex + 1) % STATUS_SEQUENCE.length];
+          const matName = prev[materialId].name;
           
           syncSingleChangeToSupabase(materialId, { [projectColumns[project]]: nextStatus });
+
+          // 寫入變更紀錄 (保留前 3 筆)
+          const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const newLog = {
+            id: Date.now() + Math.random(),
+            time: timeStr,
+            matInfo: `${matName} (${materialId})`,
+            project: project,
+            statusLabel: STATUS_CONFIG[nextStatus].label,
+            color: STATUS_CONFIG[nextStatus].color
+          };
+
+          setRecentLogs(oldLogs => {
+            const updatedLogs = [newLog, ...oldLogs].slice(0, 3);
+            localStorage.setItem('bom_recent_logs', JSON.stringify(updatedLogs));
+            return updatedLogs;
+          });
 
           return {
             ...prev,
@@ -538,7 +566,6 @@
               s.materialIds.forEach(mId => {
                 const mat = materials[mId];
                 if (mat) {
-                  // 特別處理「合併改版」的邏輯
                   if (projectName === '合併改版 (多專案)') {
                     const activeProjs = PROJECTS.filter(proj => mat.projects[proj] && mat.projects[proj] !== 'na');
                     const isAllReleased = activeProjs.every(proj => mat.projects[proj] === 'released');
@@ -547,7 +574,6 @@
                       pHasMatch = true;
                     }
                   } else {
-                    // 一般單一專案邏輯
                     const status = mat.projects[projectName];
                     if (status && status !== 'na' && status !== 'released') {
                       sHasMatch = true;
@@ -619,7 +645,7 @@
         });
       }, [statuses, uniqueMaterials]);
 
-      // 新增：計算合併改版的統計卡片
+      // 計算合併改版的統計卡片
       const combinedStats = useMemo(() => {
         const mats = uniqueMaterials.filter(m => {
           const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
@@ -628,15 +654,12 @@
         const total = mats.length;
         const done = mats.filter(m => PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na').every(p => m.projects[p] === 'released')).length;
         
-        let pendingCount = 0;
-        let revisingCount = 0;
-        let signingCount = 0;
+        let pendingCount = 0; let revisingCount = 0; let signingCount = 0;
         
         mats.forEach(m => {
           const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
           const isDone = activeProjs.every(p => m.projects[p] === 'released');
           if (!isDone) {
-            // 以目前最急迫/最前面的狀態做為計數標準，避免同一物料被重複計數
             if (activeProjs.some(p => m.projects[p] === 'signing')) signingCount++;
             else if (activeProjs.some(p => m.projects[p] === 'revising')) revisingCount++;
             else pendingCount++;
@@ -647,14 +670,10 @@
           name: '合併改版 (多專案)',
           total, done, pending: pendingCount, revising: revisingCount, signing: signingCount,
           percentage: total ? Math.round((done / total) * 100) : 0,
-          color: 'bg-fuchsia-500',
-          textColor: 'text-fuchsia-600',
-          lightBg: 'bg-fuchsia-50',
-          icon: 'fa-solid fa-layer-group'
+          color: 'bg-fuchsia-500', textColor: 'text-fuchsia-600', lightBg: 'bg-fuchsia-50', icon: 'fa-solid fa-layer-group'
         };
       }, [uniqueMaterials]);
 
-      // 將 5個專案 與 合併專案 統整為一個卡片陣列
       const allDashboardCards = [...dashboardStats, combinedStats];
 
       const filteredData = useMemo(() => {
@@ -721,7 +740,7 @@
               </div>
             )}
 
-            {/* 雲端資料庫設定視窗 (隱藏於一般使用者) */}
+            {/* 雲端資料庫設定視窗 */}
             {showSettings && isEditMode && (
               <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                 <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-4">
@@ -857,7 +876,7 @@
               </div>
             )}
 
-            {/* 新的儀表板配置：改為 6 個卡片平分或自適應排版 */}
+            {/* 6 個卡片平分或自適應排版 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               {allDashboardCards.map(s => (
                 <div 
@@ -884,7 +903,6 @@
                     </div>
                   </div>
 
-                  {/* 進度狀態計數區塊 */}
                   <div className="mt-4 grid grid-cols-3 gap-1 border-t border-slate-100 pt-3">
                     <div className="flex flex-col items-center justify-center p-1 rounded bg-yellow-50/50 hover:bg-yellow-50 transition-colors" title="待改版">
                       <span className="text-[10px] text-yellow-600 mb-0.5">待改版</span>
@@ -902,6 +920,31 @@
                 </div>
               ))}
             </div>
+
+            {/* 新增：最近三筆狀態更改紀錄 (動態牆) */}
+            {recentLogs.length > 0 && (
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center">
+                  <i className="fa-solid fa-clock-rotate-left mr-2 text-indigo-500"></i> 最近狀態更改紀錄
+                </h3>
+                <div className="flex flex-col md:flex-row gap-3">
+                  {recentLogs.map((log) => (
+                    <div key={log.id} className="flex-1 flex items-center bg-slate-50 border border-slate-100 p-3 rounded-lg hover:bg-white transition-colors">
+                      <i className="fa-solid fa-clock text-slate-300 mr-2.5"></i>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-slate-400 mb-0.5 font-mono">{log.time}</div>
+                        <div className="text-sm text-slate-700 truncate pr-2">
+                          <span className="font-semibold text-slate-800">{log.matInfo}</span> 的 {log.project}
+                        </div>
+                      </div>
+                      <div className={`ml-1 px-2.5 py-1 rounded text-xs font-bold border whitespace-nowrap ${log.color}`}>
+                        {log.statusLabel}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4">
               {filteredData.length === 0 ? (
@@ -1020,5 +1063,3 @@
   </script>
 </body>
 </html>
-
-
