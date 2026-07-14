@@ -921,12 +921,12 @@
               ))}
             </div>
 
-            {/* 新增：最近三筆狀態更改紀錄 (動態牆) */}
-            {recentLogs.length > 0 && (
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center">
-                  <i className="fa-solid fa-clock-rotate-left mr-2 text-indigo-500"></i> 最近狀態更改紀錄
-                </h3>
+            {/* 新增：最近三筆狀態更改紀錄 (常駐顯示) */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center">
+                <i className="fa-solid fa-clock-rotate-left mr-2 text-indigo-500"></i> 最近狀態更改紀錄
+              </h3>
+              {recentLogs.length > 0 ? (
                 <div className="flex flex-col md:flex-row gap-3">
                   {recentLogs.map((log) => (
                     <div key={log.id} className="flex-1 flex items-center bg-slate-50 border border-slate-100 p-3 rounded-lg hover:bg-white transition-colors">
@@ -943,8 +943,13 @@
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                  <i className="fa-regular fa-folder-open text-2xl mb-2 text-slate-300 block"></i>
+                  目前還沒有任何狀態更改紀錄。解鎖編輯模式並修改物料狀態後，紀錄會自動顯示在這裡。
+                </div>
+              )}
+            </div>
 
             <div className="space-y-4">
               {filteredData.length === 0 ? (
