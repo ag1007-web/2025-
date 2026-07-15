@@ -191,6 +191,20 @@
             } else {
               newMaterials[mCode].dueDate = dueDate || newMaterials[mCode].dueDate;
               newMaterials[mCode].memo = memo || newMaterials[mCode].memo;
+              
+              const mergeStatus = (current, incoming) => {
+                if (!incoming || incoming === 'na') return current || 'na';
+                if (!current || current === 'na') return incoming;
+                const idx1 = STATUS_SEQUENCE.indexOf(current);
+                const idx2 = STATUS_SEQUENCE.indexOf(incoming);
+                return idx1 > idx2 ? current : incoming;
+              };
+
+              newMaterials[mCode].projects['B1F整改'] = mergeStatus(newMaterials[mCode].projects['B1F整改'], row.status_b1f);
+              newMaterials[mCode].projects['IWKA轉移'] = mergeStatus(newMaterials[mCode].projects['IWKA轉移'], row.status_iwka);
+              newMaterials[mCode].projects['仿單格式化'] = mergeStatus(newMaterials[mCode].projects['仿單格式化'], row.status_format);
+              newMaterials[mCode].projects['處方藥電子仿單'] = mergeStatus(newMaterials[mCode].projects['處方藥電子仿單'], row.status_qrcode);
+              newMaterials[mCode].projects['OTC變更'] = mergeStatus(newMaterials[mCode].projects['OTC變更'], row.status_otc);
             }
           });
 
@@ -292,7 +306,7 @@
 
       const parseStatus = (rawStr) => {
         const s = String(rawStr).toLowerCase().trim();
-        if (s.includes('na') || s.includes('無須執行')) return 'na';
+        if (s === '-' || s === 'n/a' || s.includes('na') || s.includes('無須執行') || s.includes('不適用')) return 'na';
         if (s.includes('待改版') || s.includes('pending')) return 'pending';
         if (s.includes('改版中') || s.includes('revising')) return 'revising';
         if (s.includes('會簽中') || s.includes('signing')) return 'signing';
@@ -333,7 +347,7 @@
 
         const dataLines = lines.slice(1);
         const newProducts = JSON.parse(JSON.stringify(products));
-        const newMaterials = { ...materials };
+        const newMaterials = JSON.parse(JSON.stringify(materials));
         const dbUpsertRows = [];
 
         let lastPCode = ''; let lastPName = ''; let lastSCode = ''; let lastSName = '';
@@ -397,7 +411,9 @@
           const assignProjectStatus = (projKey, rawVal) => {
             const isEmpty = !rawVal || String(rawVal).trim() === '';
             if (isEmpty) {
-              if (isNewMaterial) newMaterials[mCode].projects[projKey] = 'na';
+              if (isNewMaterial) {
+                newMaterials[mCode].projects[projKey] = 'na';
+              }
             } else {
               newMaterials[mCode].projects[projKey] = parseStatus(rawVal);
             }
@@ -676,6 +692,7 @@
 
       const allDashboardCards = [...dashboardStats, combinedStats];
 
+      // 增強型搜尋與篩選引擎
       const filteredData = useMemo(() => {
         let hydratedData = products.map(product => ({
           ...product,
@@ -685,6 +702,7 @@
           }))
         }));
         
+        // 1. 儀表板專案點擊篩選 (只顯示該專案「尚未結案」的物料)
         if (activeProjectFilter) {
           hydratedData = hydratedData.map(product => {
             const filteredSpecs = product.specs.map(spec => {
@@ -704,17 +722,44 @@
           }).filter(product => product.specs.length > 0);
         }
 
+        // 2. 全域搜尋列篩選 (支援搜尋代碼、名稱、狀態、備註)
         if (searchTerm.trim()) {
           const lowerTerm = searchTerm.toLowerCase();
+          
+          // 支援特殊關鍵字解析 (當使用者搜尋「結案」或「完成」時，視同搜尋「已發檔」)
+          const searchForDone = lowerTerm.includes('結案') || lowerTerm.includes('完成') || lowerTerm.includes('已發檔');
+          
           hydratedData = hydratedData.map(product => {
-            const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.includes(lowerTerm);
+            const productMatch = product.name.toLowerCase().includes(lowerTerm) || product.code.toLowerCase().includes(lowerTerm);
+            
             const filteredSpecs = product.specs.map(spec => {
-              const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.includes(lowerTerm);
-              const filteredMaterials = spec.materials.filter(mat => 
-                mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm)
-              );
+              const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.toLowerCase().includes(lowerTerm);
+              
+              const filteredMaterials = spec.materials.filter(mat => {
+                // 條件 A: 代碼或名稱相符
+                const basicMatch = mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm);
+                // 條件 B: 備註內容相符
+                const memoMatch = mat.memo && mat.memo.toLowerCase().includes(lowerTerm);
+                // 條件 C: 專案狀態相符 (如：待改版、改版中、已發檔)
+                const statusMatch = PROJECTS.some(proj => {
+                  const statusKey = mat.projects[proj] || 'pending';
+                  if (statusKey === 'na') return false; // 略過無須執行的狀態比對
+                  const statusLabel = STATUS_CONFIG[statusKey].label.toLowerCase();
+                  
+                  // 處理特殊結案關鍵字
+                  if (searchForDone && statusKey === 'released') return true;
+                  
+                  return statusLabel.includes(lowerTerm);
+                });
+
+                return basicMatch || memoMatch || statusMatch;
+              });
+              
               if (productMatch || specMatch || filteredMaterials.length > 0) {
-                return { ...spec, materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials };
+                return { 
+                  ...spec, 
+                  materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials 
+                };
               }
               return null;
             }).filter(Boolean);
@@ -740,7 +785,7 @@
               </div>
             )}
 
-            {/* 雲端資料庫設定視窗 */}
+            {/* 雲端資料庫設定視窗 (隱藏於一般使用者) */}
             {showSettings && isEditMode && (
               <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                 <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-4">
@@ -842,7 +887,14 @@
                   </span>
                 )}
                 <div className="relative w-full md:w-64">
-                  <input type="text" placeholder="搜尋代碼、名稱..." className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  {/* 升級後的搜尋框，提示包含狀態與備註搜尋 */}
+                  <input 
+                    type="text" 
+                    placeholder="搜尋代碼、名稱、狀態、備註..." 
+                    className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" 
+                    value={searchTerm} 
+                    onChange={(e) => setSearchTerm(e.target.value)} 
+                  />
                   <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
@@ -921,7 +973,7 @@
               ))}
             </div>
 
-            {/* 新增：最近三筆狀態更改紀錄 (常駐顯示) */}
+            {/* 最近三筆狀態更改紀錄 (常駐顯示) */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center">
                 <i className="fa-solid fa-clock-rotate-left mr-2 text-indigo-500"></i> 最近狀態更改紀錄
