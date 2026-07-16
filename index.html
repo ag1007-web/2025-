@@ -25,6 +25,8 @@
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     .custom-scrollbar::-webkit-scrollbar { height: 8px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    /* Checkbox 自訂樣式 */
+    .custom-checkbox:checked { background-color: #4f46e5; border-color: #4f46e5; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -63,6 +65,12 @@
 
     const INITIAL_MATERIALS = {};
     const INITIAL_PRODUCTS = [];
+    
+    // 新增物料的預設表單狀態
+    const DEFAULT_NEW_ITEM = {
+      pCode: '', pName: '', sCode: '', sName: '', mCode: '', mName: '', dueDate: '', memo: '',
+      projects: { 'B1F整改': false, 'IWKA轉移': false, '仿單格式化': false, '處方藥電子仿單': false, 'OTC變更': false }
+    };
 
     function App() {
       const [products, setProducts] = useState(INITIAL_PRODUCTS);
@@ -89,6 +97,10 @@
       const [toastMessage, setToastMessage] = useState(null);
       const [isLoading, setIsLoading] = useState(false);
       const [isSdkLoaded, setIsSdkLoaded] = useState(false);
+      
+      // 新增物料對話框狀態
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [newItem, setNewItem] = useState(DEFAULT_NEW_ITEM);
       
       const [supabaseUrl, setSupabaseUrl] = useState(() => {
         return localStorage.getItem('supabase_url') || DEFAULT_SUPABASE_URL;
@@ -241,6 +253,112 @@
         setMaterials(INITIAL_MATERIALS);
         setShowSettings(false);
         showToast("已清除連線設定，切換至離線展示模式");
+      };
+
+      // 手動新增物料儲存邏輯
+      const handleSaveNewItem = async () => {
+        if (!newItem.mCode.trim()) {
+          showToast("請輸入料號！", "error");
+          return;
+        }
+
+        // 自動補齊與預設處理
+        let pCode = newItem.pCode.trim();
+        let sCode = newItem.sCode.trim();
+        const mCode = newItem.mCode.trim();
+        
+        if (sCode && !pCode && sCode.length >= 3) pCode = sCode.substring(0, 3);
+        if (pCode && pCode.length < 3) pCode = pCode.padStart(3, '0');
+        if (sCode && sCode.length < 5) sCode = sCode.padStart(5, '0');
+        
+        if (!pCode) pCode = '未分類產品';
+        if (!sCode) sCode = '未分類規格';
+
+        const mName = newItem.mName.trim() || getAutoMaterialName(mCode, '未命名材料');
+        const pName = newItem.pName.trim();
+        const sName = newItem.sName.trim();
+
+        if (materials[mCode]) {
+          showToast(`料號 ${mCode} 已存在系統中！請使用搜尋功能修改。`, "error");
+          return;
+        }
+
+        const dbRow = {
+          composite_key: `${pCode}_${sCode}_${mCode}`,
+          product_code_3: pCode,
+          product_name: pName,
+          spec_code_5: sCode,
+          spec_name: sName,
+          material_name: mName,
+          material_code: mCode,
+          due_date: newItem.dueDate ? newItem.dueDate.replace(/-/g, '/') : '',
+          status_b1f: newItem.projects['B1F整改'] ? 'pending' : 'na',
+          status_iwka: newItem.projects['IWKA轉移'] ? 'pending' : 'na',
+          status_format: newItem.projects['仿單格式化'] ? 'pending' : 'na',
+          status_qrcode: newItem.projects['處方藥電子仿單'] ? 'pending' : 'na',
+          status_otc: newItem.projects['OTC變更'] ? 'pending' : 'na',
+          memo: newItem.memo.trim() || ''
+        };
+
+        if (supabase) {
+          setIsLoading(true);
+          try {
+            const { error } = await supabase.from('bom_items').insert([dbRow]);
+            if (error) throw error;
+            showToast("新增物料成功，已同步至雲端！");
+          } catch (e) {
+            console.error("雲端新增失敗：", e);
+            showToast("新增失敗: " + e.message, "error");
+            setIsLoading(false);
+            return; // 終止本地更新
+          }
+          setIsLoading(false);
+        } else {
+          showToast("本地新增物料成功！");
+        }
+
+        // 更新本地 State
+        setMaterials(prev => ({
+          ...prev,
+          [mCode]: {
+            id: mCode,
+            name: mName,
+            dueDate: dbRow.due_date,
+            memo: dbRow.memo,
+            projects: {
+              'B1F整改': dbRow.status_b1f,
+              'IWKA轉移': dbRow.status_iwka,
+              '仿單格式化': dbRow.status_format,
+              '處方藥電子仿單': dbRow.status_qrcode,
+              'OTC變更': dbRow.status_otc
+            }
+          }
+        }));
+
+        setProducts(prev => {
+          const next = JSON.parse(JSON.stringify(prev));
+          let prod = next.find(p => p.code === pCode);
+          if (!prod) {
+            prod = { code: pCode, name: pName, specs: [] };
+            next.push(prod);
+          }
+          let spec = prod.specs.find(s => s.code === sCode);
+          if (!spec) {
+            spec = { code: sCode, name: sName, materialIds: [] };
+            prod.specs.push(spec);
+          }
+          if (!spec.materialIds.includes(mCode)) {
+            spec.materialIds.push(mCode);
+          }
+          return next;
+        });
+
+        // 關閉 Modal 並重置
+        setShowAddModal(false);
+        setNewItem(DEFAULT_NEW_ITEM);
+        // 自動展開該產品以利查看
+        if (!expandedProducts.includes(pCode)) setExpandedProducts(prev => [...prev, pCode]);
+        if (!expandedSpecs.includes(sCode)) setExpandedSpecs(prev => [...prev, sCode]);
       };
 
       const downloadSampleCSV = () => {
@@ -702,7 +820,6 @@
           }))
         }));
         
-        // 1. 儀表板專案點擊篩選 (只顯示該專案「尚未結案」的物料)
         if (activeProjectFilter) {
           hydratedData = hydratedData.map(product => {
             const filteredSpecs = product.specs.map(spec => {
@@ -722,11 +839,10 @@
           }).filter(product => product.specs.length > 0);
         }
 
-        // 2. 全域搜尋列篩選 (支援搜尋代碼、名稱、狀態、備註)
         if (searchTerm.trim()) {
           const lowerTerm = searchTerm.toLowerCase();
           
-          // 支援特殊關鍵字解析 (當使用者搜尋「結案」或「完成」時，視同搜尋「已發檔」)
+          // 支援特殊關鍵字解析
           const searchForDone = lowerTerm.includes('結案') || lowerTerm.includes('完成') || lowerTerm.includes('已發檔');
           
           hydratedData = hydratedData.map(product => {
@@ -736,19 +852,13 @@
               const specMatch = spec.name.toLowerCase().includes(lowerTerm) || spec.code.toLowerCase().includes(lowerTerm);
               
               const filteredMaterials = spec.materials.filter(mat => {
-                // 條件 A: 代碼或名稱相符
                 const basicMatch = mat.name.toLowerCase().includes(lowerTerm) || mat.id.toLowerCase().includes(lowerTerm);
-                // 條件 B: 備註內容相符
                 const memoMatch = mat.memo && mat.memo.toLowerCase().includes(lowerTerm);
-                // 條件 C: 專案狀態相符 (如：待改版、改版中、已發檔)
                 const statusMatch = PROJECTS.some(proj => {
                   const statusKey = mat.projects[proj] || 'pending';
-                  if (statusKey === 'na') return false; // 略過無須執行的狀態比對
+                  if (statusKey === 'na') return false; 
                   const statusLabel = STATUS_CONFIG[statusKey].label.toLowerCase();
-                  
-                  // 處理特殊結案關鍵字
                   if (searchForDone && statusKey === 'released') return true;
-                  
                   return statusLabel.includes(lowerTerm);
                 });
 
@@ -782,6 +892,102 @@
               <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all duration-300 ${toastMessage.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
                 {toastMessage.type === 'error' ? <i className="fa-solid fa-circle-exclamation mr-2"></i> : <i className="fa-solid fa-circle-check mr-2 text-emerald-400"></i>}
                 {toastMessage.message}
+              </div>
+            )}
+
+            {/* 新增物料視窗 (隱藏於一般使用者) */}
+            {showAddModal && isEditMode && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl space-y-6">
+                  <div className="flex justify-between items-center border-b pb-4">
+                    <h2 className="text-xl font-bold flex items-center text-slate-900">
+                      <i className="fa-solid fa-square-plus mr-2 text-indigo-600"></i> 手動新增產品與物料
+                    </h2>
+                    <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
+                      <i className="fa-solid fa-xmark text-xl"></i>
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 產品層級 */}
+                    <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <h3 className="font-semibold text-slate-700 text-sm mb-2"><i className="fa-solid fa-box-open mr-1.5 text-slate-400"></i>產品設定</h3>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">產品 3 碼 <span className="text-red-500">*</span></label>
+                        <input type="text" placeholder="例: 021" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.pCode} onChange={(e) => setNewItem({...newItem, pCode: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">產品名稱</label>
+                        <input type="text" placeholder="例: 杏聯乳膏" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.pName} onChange={(e) => setNewItem({...newItem, pName: e.target.value})} />
+                      </div>
+                    </div>
+
+                    {/* 規格層級 */}
+                    <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <h3 className="font-semibold text-slate-700 text-sm mb-2"><i className="fa-solid fa-tags mr-1.5 text-slate-400"></i>規格設定</h3>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">規格 5 碼 <span className="text-red-500">*</span></label>
+                        <input type="text" placeholder="例: 02123" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.sCode} onChange={(e) => setNewItem({...newItem, sCode: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">規格名稱</label>
+                        <input type="text" placeholder="例: 10g" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.sName} onChange={(e) => setNewItem({...newItem, sName: e.target.value})} />
+                      </div>
+                    </div>
+
+                    {/* 物料層級 (滿版) */}
+                    <div className="md:col-span-2 space-y-4 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 mt-2">
+                      <h3 className="font-semibold text-indigo-900 text-sm mb-2"><i className="fa-solid fa-puzzle-piece mr-1.5 text-indigo-500"></i>物料明細</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">物料料號 (不可重複) <span className="text-red-500">*</span></label>
+                          <input type="text" placeholder="例: PB-1234" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.mCode} onChange={(e) => setNewItem({...newItem, mCode: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">標示材料名稱 <span className="text-slate-400 font-normal">(空白將自動產生)</span></label>
+                          <input type="text" placeholder="例: 支裝盒" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.mName} onChange={(e) => setNewItem({...newItem, mName: e.target.value})} />
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">預計完成日</label>
+                          <input type="date" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.dueDate} onChange={(e) => setNewItem({...newItem, dueDate: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">備註</label>
+                          <input type="text" placeholder="加入備註..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value={newItem.memo} onChange={(e) => setNewItem({...newItem, memo: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div className="pt-2">
+                        <label className="block text-xs font-semibold text-slate-600 mb-2">參與的整改專案 (打勾將自動設為「待改版」)</label>
+                        <div className="flex flex-wrap gap-3">
+                          {PROJECTS.map(proj => (
+                            <label key={proj} className="flex items-center space-x-2 cursor-pointer bg-white px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-indigo-50 transition-colors">
+                              <input 
+                                type="checkbox" 
+                                className="custom-checkbox w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                                checked={newItem.projects[proj]}
+                                onChange={(e) => setNewItem({...newItem, projects: {...newItem.projects, [proj]: e.target.checked}})}
+                              />
+                              <span className="text-sm font-medium text-slate-700">{proj}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t">
+                    <button onClick={() => setShowAddModal(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-bold transition-colors">
+                      取消
+                    </button>
+                    <button onClick={handleSaveNewItem} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold transition-colors shadow-sm shadow-indigo-200">
+                      <i className="fa-solid fa-cloud-arrow-up mr-2"></i> 儲存並新增
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -901,21 +1107,22 @@
                   {/* 只在編輯模式顯示的管理按鈕 */}
                   {isEditMode && (
                     <>
+                      {/* 新增物料按鈕 */}
+                      <button onClick={() => { setNewItem(DEFAULT_NEW_ITEM); setShowAddModal(true); }} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap shadow-sm">
+                        <i className="fa-solid fa-plus mr-1.5"></i> 新增物料
+                      </button>
                       <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300">
                         <i className="fa-solid fa-database mr-1.5"></i> 連線設定
                       </button>
-                      <button onClick={downloadSampleCSV} className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">
-                        <i className="fa-solid fa-download mr-1.5"></i> 下載範本
-                      </button>
-                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 whitespace-nowrap">
-                        <i className="fa-solid fa-upload mr-1.5"></i> 匯入報表
+                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 whitespace-nowrap shadow-sm">
+                        <i className="fa-solid fa-file-import mr-1.5"></i> 匯入報表
                       </button>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                     </>
                   )}
                   {/* 所有人都可使用的匯出按鈕 */}
-                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 whitespace-nowrap">
-                    <i className="fa-solid fa-database mr-1.5"></i> 匯出 CSV
+                  <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 whitespace-nowrap shadow-sm">
+                    <i className="fa-solid fa-file-export mr-1.5"></i> 匯出 CSV
                   </button>
                 </div>
               </div>
