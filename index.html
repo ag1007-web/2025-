@@ -25,7 +25,6 @@
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     .custom-scrollbar::-webkit-scrollbar { height: 8px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    /* Checkbox 自訂樣式 */
     .custom-checkbox:checked { background-color: #4f46e5; border-color: #4f46e5; }
   </style>
 </head>
@@ -66,7 +65,6 @@
     const INITIAL_MATERIALS = {};
     const INITIAL_PRODUCTS = [];
     
-    // 新增物料的預設表單狀態
     const DEFAULT_NEW_ITEM = {
       pCode: '', pName: '', sCode: '', sName: '', mCode: '', mName: '', dueDate: '', memo: '',
       projects: { 'B1F整改': false, 'IWKA轉移': false, '仿單格式化': false, '處方藥電子仿單': false, 'OTC變更': false }
@@ -77,7 +75,6 @@
       const [materials, setMaterials] = useState(INITIAL_MATERIALS);
       const [searchTerm, setSearchTerm] = useState('');
       
-      // 最近三筆更改紀錄
       const [recentLogs, setRecentLogs] = useState(() => {
         try {
           return JSON.parse(localStorage.getItem('bom_recent_logs')) || [];
@@ -86,10 +83,7 @@
         }
       });
 
-      // 專案篩選狀態
       const [activeProjectFilter, setActiveProjectFilter] = useState(null);
-
-      // 檢視與編輯模式切換 (預設為檢視模式：鎖定)
       const [isEditMode, setIsEditMode] = useState(false);
 
       const [expandedProducts, setExpandedProducts] = useState([]); 
@@ -98,7 +92,6 @@
       const [isLoading, setIsLoading] = useState(false);
       const [isSdkLoaded, setIsSdkLoaded] = useState(false);
       
-      // 新增物料對話框狀態
       const [showAddModal, setShowAddModal] = useState(false);
       const [newItem, setNewItem] = useState(DEFAULT_NEW_ITEM);
       
@@ -113,7 +106,6 @@
       
       const fileInputRef = useRef(null);
 
-      // 動態驗證 Supabase CDN
       useEffect(() => {
         if (window.supabase) {
           setIsSdkLoaded(true);
@@ -128,7 +120,6 @@
         return () => clearInterval(interval);
       }, []);
 
-      // 實例化 Supabase Client
       const supabase = useMemo(() => {
         const urlToUse = supabaseUrl || DEFAULT_SUPABASE_URL;
         const keyToUse = supabaseKey || DEFAULT_SUPABASE_ANON_KEY;
@@ -147,7 +138,6 @@
         setTimeout(() => setToastMessage(null), 3000);
       };
 
-      // 從 Supabase 讀取資料
       const fetchSupabaseData = async () => {
         if (!supabase) {
           setIsDbConnected(false);
@@ -255,14 +245,12 @@
         showToast("已清除連線設定，切換至離線展示模式");
       };
 
-      // 手動新增物料儲存邏輯
       const handleSaveNewItem = async () => {
         if (!newItem.mCode.trim()) {
           showToast("請輸入料號！", "error");
           return;
         }
 
-        // 自動補齊與預設處理
         let pCode = newItem.pCode.trim();
         let sCode = newItem.sCode.trim();
         const mCode = newItem.mCode.trim();
@@ -310,14 +298,13 @@
             console.error("雲端新增失敗：", e);
             showToast("新增失敗: " + e.message, "error");
             setIsLoading(false);
-            return; // 終止本地更新
+            return;
           }
           setIsLoading(false);
         } else {
           showToast("本地新增物料成功！");
         }
 
-        // 更新本地 State
         setMaterials(prev => ({
           ...prev,
           [mCode]: {
@@ -353,33 +340,10 @@
           return next;
         });
 
-        // 關閉 Modal 並重置
         setShowAddModal(false);
         setNewItem(DEFAULT_NEW_ITEM);
-        // 自動展開該產品以利查看
         if (!expandedProducts.includes(pCode)) setExpandedProducts(prev => [...prev, pCode]);
         if (!expandedSpecs.includes(sCode)) setExpandedSpecs(prev => [...prev, sCode]);
-      };
-
-      const downloadSampleCSV = () => {
-        const headers = "產品3碼\t產品名稱\t規格5碼\t規格名稱\t標示材料\t料號\t預計完成日\tB1F整改狀態\tIWKA轉移狀態\t仿單格式化狀態\t處方藥電子仿單狀態\tOTC變更狀態\t備註\r\n";
-        const sampleRows = "021\t杏聯乳膏\t02123\t10g\t鋁管\tpt-891\t2026/08/15\t待改版\t待改版\tNA\tNA\t待改版\t測試備註\r\n";
-        const csvContent = headers + sampleRows;
-        
-        const buffer = new ArrayBuffer(csvContent.length * 2 + 2);
-        const view = new DataView(buffer);
-        view.setUint16(0, 0xFEFF, true); 
-        for (let i = 0; i < csvContent.length; i++) {
-          view.setUint16(i * 2 + 2, csvContent.charCodeAt(i), true);
-        }
-        
-        const blob = new Blob([view], { type: "application/octet-stream" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "BOM_匯入範本_第二版.csv";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
       };
 
       const exportCSV = () => {
@@ -390,6 +354,7 @@
           p.specs.forEach(s => {
             s.materialIds.forEach(mId => {
               const m = materials[mId];
+              if (!m) return;
               const row = [
                 p.code, p.name, s.code, s.name, m.name, m.id, m.dueDate,
                 STATUS_CONFIG[m.projects['B1F整改'] || 'pending']?.label,
@@ -424,7 +389,7 @@
 
       const parseStatus = (rawStr) => {
         const s = String(rawStr).toLowerCase().trim();
-        if (s === '-' || s === 'n/a' || s.includes('na') || s.includes('無須執行') || s.includes('不適用')) return 'na';
+        if (s.includes('na') || s.includes('無須執行')) return 'na';
         if (s.includes('待改版') || s.includes('pending')) return 'pending';
         if (s.includes('改版中') || s.includes('revising')) return 'revising';
         if (s.includes('會簽中') || s.includes('signing')) return 'signing';
@@ -465,9 +430,8 @@
 
         const dataLines = lines.slice(1);
         const newProducts = JSON.parse(JSON.stringify(products));
-        const newMaterials = JSON.parse(JSON.stringify(materials));
+        const newMaterials = { ...materials };
         const dbUpsertRows = [];
-
         let lastPCode = ''; let lastPName = ''; let lastSCode = ''; let lastSName = '';
 
         dataLines.forEach(line => {
@@ -476,17 +440,23 @@
           
           let [pCode, pName, sCode, sName, rawMName, mCode, dueDate, b1f, iwka, leaf, qr, otc, memo] = row;
           
-          if (!mCode) return; 
+          if (!mCode) return;
 
-          if (sCode && /^\d+(\.\d+)?[Ee]\+\d+$/.test(sCode)) {
+          if (sCode && /^\d+(\.\d+)?[Ee]+\d+$/.test(sCode)) {
             sCode = String(Number(sCode));
           }
           if (sCode) {
             sCode = String(sCode).trim();
-            if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) sCode = sCode.padStart(5, '0');
+            if (!isNaN(sCode) && sCode.length > 0 && sCode.length < 5) {
+              sCode = sCode.padStart(5, '0');
+            }
           }
-          if (pCode) pCode = String(pCode).trim();
-          if (!pCode && sCode && sCode.length >= 3) pCode = sCode.substring(0, 3);
+          if (pCode) {
+            pCode = String(pCode).trim();
+          }
+          if (!pCode && sCode && sCode.length >= 3) {
+            pCode = sCode.substring(0, 3);
+          }
 
           if (pCode) {
             if (!isNaN(pCode) && pCode.length > 0 && pCode.length < 3) pCode = pCode.padStart(3, '0');
@@ -529,9 +499,7 @@
           const assignProjectStatus = (projKey, rawVal) => {
             const isEmpty = !rawVal || String(rawVal).trim() === '';
             if (isEmpty) {
-              if (isNewMaterial) {
-                newMaterials[mCode].projects[projKey] = 'na';
-              }
+              if (isNewMaterial) newMaterials[mCode].projects[projKey] = 'na';
             } else {
               newMaterials[mCode].projects[projKey] = parseStatus(rawVal);
             }
@@ -545,8 +513,13 @@
 
           dbUpsertRows.push({
             composite_key: `${pCode}_${sCode}_${mCode}`,
-            product_code_3: pCode, product_name: pName, spec_code_5: sCode, spec_name: sName,
-            material_name: mName, material_code: mCode, due_date: newMaterials[mCode].dueDate || '',
+            product_code_3: pCode,
+            product_name: pName,
+            spec_code_5: sCode,
+            spec_name: sName,
+            material_name: mName,
+            material_code: mCode,
+            due_date: newMaterials[mCode].dueDate || '',
             status_b1f: newMaterials[mCode].projects['B1F整改'] || 'na',
             status_iwka: newMaterials[mCode].projects['IWKA轉移'] || 'na',
             status_format: newMaterials[mCode].projects['仿單格式化'] || 'na',
@@ -565,17 +538,17 @@
         setMaterials(newMaterials);
         setExpandedProducts([]);
         setExpandedSpecs([]);
-        setActiveProjectFilter(null);
 
         if (supabase) {
           setIsLoading(true);
           try {
             const keysToDelete = dbUpsertRows.map(r => r.composite_key);
             if (keysToDelete.length > 0) {
-              await supabase.from('bom_items').delete().in('composite_key', keysToDelete);
+              const { error: delError } = await supabase.from('bom_items').delete().in('composite_key', keysToDelete);
+              if (delError) throw delError;
             }
-            const { error } = await supabase.from('bom_items').insert(dbUpsertRows);
-            if (error) throw error;
+            const { error: insError } = await supabase.from('bom_items').insert(dbUpsertRows);
+            if (insError) throw insError;
             showToast("資料匯入成功，已同步至 Supabase 雲端！");
           } catch (e) {
             console.error("雲端寫入發生異常：", e);
@@ -635,7 +608,6 @@
 
       const cycleStatus = (materialId, project) => {
         if (!isEditMode) return;
-        
         const projectColumns = {
           'B1F整改': 'status_b1f',
           'IWKA轉移': 'status_iwka',
@@ -648,16 +620,14 @@
           const currentStatus = prev[materialId].projects[project] || 'pending';
           const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
           const nextStatus = STATUS_SEQUENCE[(currentIndex + 1) % STATUS_SEQUENCE.length];
-          const matName = prev[materialId].name;
           
           syncSingleChangeToSupabase(materialId, { [projectColumns[project]]: nextStatus });
 
-          // 寫入變更紀錄 (保留前 3 筆)
           const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
           const newLog = {
             id: Date.now() + Math.random(),
             time: timeStr,
-            matInfo: `${matName} (${materialId})`,
+            matInfo: `${prev[materialId].name} (${materialId})`,
             project: project,
             statusLabel: STATUS_CONFIG[nextStatus].label,
             color: STATUS_CONFIG[nextStatus].color
@@ -689,7 +659,6 @@
           setExpandedSpecs([]);
         } else {
           setActiveProjectFilter(projectName);
-          
           const productsToExpand = [];
           const specsToExpand = [];
 
@@ -700,19 +669,10 @@
               s.materialIds.forEach(mId => {
                 const mat = materials[mId];
                 if (mat) {
-                  if (projectName === '合併改版 (多專案)') {
-                    const activeProjs = PROJECTS.filter(proj => mat.projects[proj] && mat.projects[proj] !== 'na');
-                    const isAllReleased = activeProjs.every(proj => mat.projects[proj] === 'released');
-                    if (activeProjs.length >= 2 && !isAllReleased) {
-                      sHasMatch = true;
-                      pHasMatch = true;
-                    }
-                  } else {
-                    const status = mat.projects[projectName];
-                    if (status && status !== 'na' && status !== 'released') {
-                      sHasMatch = true;
-                      pHasMatch = true;
-                    }
+                  const status = mat.projects[projectName];
+                  if (status && status !== 'na' && status !== 'released') {
+                    sHasMatch = true;
+                    pHasMatch = true;
                   }
                 }
               });
@@ -759,12 +719,10 @@
         return s;
       }, [materials]);
 
-      // 一般單一專案的統計
       const dashboardStats = useMemo(() => {
         return PROJECTS.map(proj => {
           const mats = uniqueMaterials;
           const active = mats.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') !== 'na');
-          
           const done = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'released');
           const pendingCount = active.filter(m => (statuses[`${m.id}_${proj}`] || 'pending') === 'pending').length;
           const revisingCount = active.filter(m => (statuses[`${m.id}_${proj}`]) === 'revising').length;
@@ -779,38 +737,6 @@
         });
       }, [statuses, uniqueMaterials]);
 
-      // 計算合併改版的統計卡片
-      const combinedStats = useMemo(() => {
-        const mats = uniqueMaterials.filter(m => {
-          const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
-          return activeProjs.length >= 2;
-        });
-        const total = mats.length;
-        const done = mats.filter(m => PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na').every(p => m.projects[p] === 'released')).length;
-        
-        let pendingCount = 0; let revisingCount = 0; let signingCount = 0;
-        
-        mats.forEach(m => {
-          const activeProjs = PROJECTS.filter(p => (m.projects[p] || 'pending') !== 'na');
-          const isDone = activeProjs.every(p => m.projects[p] === 'released');
-          if (!isDone) {
-            if (activeProjs.some(p => m.projects[p] === 'signing')) signingCount++;
-            else if (activeProjs.some(p => m.projects[p] === 'revising')) revisingCount++;
-            else pendingCount++;
-          }
-        });
-
-        return {
-          name: '合併改版 (多專案)',
-          total, done, pending: pendingCount, revising: revisingCount, signing: signingCount,
-          percentage: total ? Math.round((done / total) * 100) : 0,
-          color: 'bg-fuchsia-500', textColor: 'text-fuchsia-600', lightBg: 'bg-fuchsia-50', icon: 'fa-solid fa-layer-group'
-        };
-      }, [uniqueMaterials]);
-
-      const allDashboardCards = [...dashboardStats, combinedStats];
-
-      // 增強型搜尋與篩選引擎
       const filteredData = useMemo(() => {
         let hydratedData = products.map(product => ({
           ...product,
@@ -824,14 +750,8 @@
           hydratedData = hydratedData.map(product => {
             const filteredSpecs = product.specs.map(spec => {
               const filteredMaterials = spec.materials.filter(mat => {
-                if (activeProjectFilter === '合併改版 (多專案)') {
-                  const activeProjs = PROJECTS.filter(p => mat.projects[p] && mat.projects[p] !== 'na');
-                  const isAllReleased = activeProjs.every(p => mat.projects[p] === 'released');
-                  return activeProjs.length >= 2 && !isAllReleased;
-                } else {
-                  const status = mat.projects[activeProjectFilter];
-                  return status && status !== 'na' && status !== 'released';
-                }
+                const status = mat.projects[activeProjectFilter];
+                return status && status !== 'na' && status !== 'released';
               });
               return { ...spec, materials: filteredMaterials };
             }).filter(spec => spec.materials.length > 0);
@@ -841,8 +761,6 @@
 
         if (searchTerm.trim()) {
           const lowerTerm = searchTerm.toLowerCase();
-          
-          // 支援特殊關鍵字解析
           const searchForDone = lowerTerm.includes('結案') || lowerTerm.includes('完成') || lowerTerm.includes('已發檔');
           
           hydratedData = hydratedData.map(product => {
@@ -868,7 +786,7 @@
               if (productMatch || specMatch || filteredMaterials.length > 0) {
                 return { 
                   ...spec, 
-                  materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials 
+                  materials: (productMatch || specMatch) ? spec.materials : filteredMaterials 
                 };
               }
               return null;
@@ -895,9 +813,8 @@
               </div>
             )}
 
-            {/* 新增物料視窗 (隱藏於一般使用者) */}
             {showAddModal && isEditMode && (
-              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                 <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl space-y-6">
                   <div className="flex justify-between items-center border-b pb-4">
                     <h2 className="text-xl font-bold flex items-center text-slate-900">
@@ -909,7 +826,6 @@
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* 產品層級 */}
                     <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
                       <h3 className="font-semibold text-slate-700 text-sm mb-2"><i className="fa-solid fa-box-open mr-1.5 text-slate-400"></i>產品設定</h3>
                       <div>
@@ -922,7 +838,6 @@
                       </div>
                     </div>
 
-                    {/* 規格層級 */}
                     <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
                       <h3 className="font-semibold text-slate-700 text-sm mb-2"><i className="fa-solid fa-tags mr-1.5 text-slate-400"></i>規格設定</h3>
                       <div>
@@ -935,7 +850,6 @@
                       </div>
                     </div>
 
-                    {/* 物料層級 (滿版) */}
                     <div className="md:col-span-2 space-y-4 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 mt-2">
                       <h3 className="font-semibold text-indigo-900 text-sm mb-2"><i className="fa-solid fa-puzzle-piece mr-1.5 text-indigo-500"></i>物料明細</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -991,13 +905,17 @@
               </div>
             )}
 
-            {/* 雲端資料庫設定視窗 (隱藏於一般使用者) */}
-            {showSettings && isEditMode && (
+            {showSettings && (
               <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                 <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-4">
-                  <h2 className="text-xl font-bold flex items-center text-slate-900">
-                    <i className="fa-solid fa-database mr-2 text-indigo-600"></i> Supabase 雲端設定
-                  </h2>
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-bold flex items-center text-slate-900">
+                      <i className="fa-solid fa-database mr-2 text-indigo-600"></i> Supabase 雲端設定
+                    </h2>
+                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                      <i className="fa-solid fa-xmark text-xl"></i>
+                    </button>
+                  </div>
                   <p className="text-sm text-slate-500">
                     請輸入您在 Supabase 的 Project API 憑證，將系統資料直接儲存在雲端。
                   </p>
@@ -1051,7 +969,7 @@
                     </span>
                   ) : (
                     <span className="ml-3 text-xs font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full border border-amber-200">
-                      離線模式 (無法獲取最新資料)
+                      離線模式 (請點擊連線設定)
                     </span>
                   )}
                 </h1>
@@ -1059,9 +977,8 @@
               </div>
               <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
                 
-                {/* 檢視/編輯 模式切換鈕 */}
                 {isEditMode ? (
-                  <button onClick={() => setIsEditMode(false)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-colors">
+                  <button onClick={() => setIsEditMode(false)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-colors whitespace-nowrap">
                     <i className="fa-solid fa-unlock mr-1.5"></i>
                     編輯模式 (點擊鎖定)
                   </button>
@@ -1076,7 +993,7 @@
                         alert("密碼錯誤，僅能維持檢視模式");
                       }
                     }} 
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-colors"
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition-colors whitespace-nowrap"
                   >
                     <i className="fa-solid fa-lock mr-1.5"></i>
                     檢視模式 (點擊解鎖)
@@ -1086,14 +1003,13 @@
                 {activeProjectFilter && (
                   <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm whitespace-nowrap">
                     <i className="fa-solid fa-filter mr-1.5"></i>
-                    篩選: {activeProjectFilter}
+                    篩選: {activeProjectFilter} (未發檔)
                     <button onClick={(e) => { e.stopPropagation(); setActiveProjectFilter(null); setExpandedProducts([]); setExpandedSpecs([]); }} className="ml-2 hover:text-indigo-900 focus:outline-none">
                       <i className="fa-solid fa-xmark text-lg"></i>
                     </button>
                   </span>
                 )}
                 <div className="relative w-full md:w-64">
-                  {/* 升級後的搜尋框，提示包含狀態與備註搜尋 */}
                   <input 
                     type="text" 
                     placeholder="搜尋代碼、名稱、狀態、備註..." 
@@ -1104,15 +1020,13 @@
                   <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
-                  {/* 只在編輯模式顯示的管理按鈕 */}
+                  <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300 whitespace-nowrap">
+                    <i className="fa-solid fa-database mr-1.5"></i> 連線設定
+                  </button>
                   {isEditMode && (
                     <>
-                      {/* 新增物料按鈕 */}
                       <button onClick={() => { setNewItem(DEFAULT_NEW_ITEM); setShowAddModal(true); }} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap shadow-sm">
                         <i className="fa-solid fa-plus mr-1.5"></i> 新增物料
-                      </button>
-                      <button onClick={() => setShowSettings(true)} className="flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium border border-slate-300">
-                        <i className="fa-solid fa-database mr-1.5"></i> 連線設定
                       </button>
                       <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 whitespace-nowrap shadow-sm">
                         <i className="fa-solid fa-file-import mr-1.5"></i> 匯入報表
@@ -1120,7 +1034,6 @@
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                     </>
                   )}
-                  {/* 所有人都可使用的匯出按鈕 */}
                   <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 whitespace-nowrap shadow-sm">
                     <i className="fa-solid fa-file-export mr-1.5"></i> 匯出 CSV
                   </button>
@@ -1135,9 +1048,8 @@
               </div>
             )}
 
-            {/* 6 個卡片平分或自適應排版 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              {allDashboardCards.map(s => (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              {dashboardStats.map(s => (
                 <div 
                   key={s.name} 
                   onClick={() => handleProjectFilterClick(s.name)}
@@ -1180,7 +1092,6 @@
               ))}
             </div>
 
-            {/* 最近三筆狀態更改紀錄 (常駐顯示) */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center">
                 <i className="fa-solid fa-clock-rotate-left mr-2 text-indigo-500"></i> 最近狀態更改紀錄
@@ -1205,7 +1116,7 @@
               ) : (
                 <div className="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
                   <i className="fa-regular fa-folder-open text-2xl mb-2 text-slate-300 block"></i>
-                  目前還沒有任何狀態更改紀錄。解鎖編輯模式並修改物料狀態後，紀錄會自動顯示在這裡。
+                  目前還沒有任何狀態更改紀錄。點擊解鎖編輯模式並修改物料狀態後，紀錄會自動顯示在這裡。
                 </div>
               )}
             </div>
@@ -1215,7 +1126,7 @@
                 <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
                   <i className="fa-solid fa-file-lines text-5xl text-slate-300 mx-auto mb-3 block"></i>
                   <p className="text-slate-500">
-                    {searchTerm || activeProjectFilter ? '找不到符合篩選條件的資料' : '目前沒有任何資料'}
+                    {searchTerm || activeProjectFilter ? '找不到符合篩選條件的資料' : '目前沒有任何資料，請點擊上方「連線設定」或匯入報表'}
                   </p>
                 </div>
               ) : (
