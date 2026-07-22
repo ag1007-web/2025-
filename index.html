@@ -868,7 +868,7 @@
               if (productMatch || specMatch || filteredMaterials.length > 0) {
                 return { 
                   ...spec, 
-                  materials: (productMatch || specMatch) ? spec.materials : filteredMaterials 
+                  materials: (productMatch || specMatch) && filteredMaterials.length === 0 ? spec.materials : filteredMaterials 
                 };
               }
               return null;
